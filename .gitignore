@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Zugangsdaten & Konfiguration
+.env
+
+# System & Datenbanken
+.DS_Store
+*.sqlite3
+data/
