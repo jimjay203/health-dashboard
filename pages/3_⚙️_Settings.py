@@ -4,7 +4,8 @@ from garmin_auth import get_garmin_client
 from garmin_service import fetch_and_store_garmin_data
 from garmin_backfill import run_backfill
 from garmin_explore import run_exploration
-from db import init_db
+from garmin_activities import sync_activity_list, sync_activity_details
+from db import init_db, get_connection
 
 st.set_page_config(page_title="Einstellungen & Data Engine", page_icon="⚙️")
 init_db()
@@ -137,3 +138,78 @@ if st.button("Exploration starten 🧪"):
                     st.json(result["data"])
                 else:
                     st.error(result["error"])
+
+st.divider()
+
+st.subheader("🏃 Aktivitäten (Läufe, Rad, Schwimmen)")
+st.caption(
+    "Bewusst getrennt vom automatischen Tages-/Backfill-Sync und nur manuell hier anstoßbar - "
+    "eine volle Historie kann mehrere hundert Aktivitäten und pro Aktivität mehrere hundert "
+    "Detail-Zeilen (GPS/HF/Leistung pro Sekunde) umfassen."
+)
+
+conn = get_connection()
+total_activities = conn.execute("SELECT COUNT(*) AS n FROM garmin_activities").fetchone()["n"]
+pending_details = conn.execute(
+    "SELECT COUNT(*) AS n FROM garmin_activities WHERE has_details_synced = 0"
+).fetchone()["n"]
+conn.close()
+
+st.write(f"📋 {total_activities} Aktivitäten gespeichert · {pending_details} davon noch ohne Detail-Zeitreihe")
+
+act_col1, act_col2 = st.columns(2)
+
+with act_col1:
+    st.markdown("**1. Aktivitätsliste aktualisieren**")
+    activity_limit = st.number_input(
+        "Wie viele der letzten Aktivitäten laden?", min_value=1, max_value=200, value=20, step=10
+    )
+    if st.button("Aktivitätsliste laden 📋"):
+        with st.spinner(f"Lade die letzten {activity_limit} Aktivitäten..."):
+            try:
+                client = get_garmin_client()
+                count = sync_activity_list(client, limit=activity_limit)
+                st.success(f"{count} Aktivitäten gespeichert/aktualisiert.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Fehler beim Laden der Aktivitätsliste: {e}")
+
+with act_col2:
+    st.markdown("**2. Detail-Zeitreihen nachladen**")
+    detail_limit = st.number_input(
+        "Für wie viele Aktivitäten (ohne Details, neueste zuerst)?",
+        min_value=1, max_value=50, value=5, step=1
+    )
+    if st.button("Detaildaten laden 🔬"):
+        detail_progress = st.progress(0)
+        detail_status = st.empty()
+        try:
+            client = get_garmin_client()
+
+            def on_detail_progress(index, total, activity_name, status):
+                detail_progress.progress(min(index / total, 1.0))
+                if status == "ok":
+                    detail_status.write(f"✅ [{index}/{total}] {activity_name}")
+                else:
+                    detail_status.warning(f"❌ [{index}/{total}] {activity_name} übersprungen")
+
+            synced, errors = sync_activity_details(client, max_count=detail_limit, on_progress=on_detail_progress)
+            detail_progress.progress(1.0)
+            st.success(f"Fertig! {synced} Aktivitäten mit Details, {errors} Fehler.")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Fehler beim Laden der Detaildaten: {e}")
+
+if total_activities > 0:
+    with st.expander("Gespeicherte Aktivitäten anzeigen"):
+        conn = get_connection()
+        rows = conn.execute(
+            "SELECT start_time_local, activity_type, activity_name, "
+            "ROUND(distance_meters / 1000.0, 2) AS km, has_details_synced "
+            "FROM garmin_activities ORDER BY start_time_local DESC LIMIT 50"
+        ).fetchall()
+        conn.close()
+        st.dataframe(
+            [dict(r) for r in rows],
+            hide_index=True, use_container_width=True
+        )

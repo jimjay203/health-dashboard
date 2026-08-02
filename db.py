@@ -426,6 +426,87 @@ def init_db():
     )
     """)
 
+    # Aktivitäten (Läufe/Rad/Schwimmen etc.) - bewusst NICHT Teil des automatischen Tages-/
+    # Backfill-Syncs, sondern nur manuell über die Settings-Seite anstoßbar (siehe garmin_activities.py).
+    # Primary Key ist Garmins eigene activity_id. cadence/cadence_unit fassen die je nach Sportart
+    # unterschiedlich benannten Felder zusammen (averageRunningCadenceInStepsPerMinute vs.
+    # averageBikingCadenceInRevPerMinute vs. averageSwimCadenceInStrokesPerMinute).
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS garmin_activities (
+        activity_id INTEGER PRIMARY KEY,
+        activity_name TEXT,
+        activity_type TEXT,
+        start_time_local TEXT,
+        start_time_gmt TEXT,
+        distance_meters REAL,
+        duration_seconds REAL,
+        elevation_gain REAL,
+        elevation_loss REAL,
+        average_speed REAL,
+        max_speed REAL,
+        calories REAL,
+        average_hr REAL,
+        max_hr REAL,
+        hr_zone_1 REAL,
+        hr_zone_2 REAL,
+        hr_zone_3 REAL,
+        hr_zone_4 REAL,
+        hr_zone_5 REAL,
+        avg_power REAL,
+        max_power REAL,
+        norm_power REAL,
+        power_zone_1 REAL,
+        power_zone_2 REAL,
+        power_zone_3 REAL,
+        power_zone_4 REAL,
+        power_zone_5 REAL,
+        cadence REAL,
+        cadence_unit TEXT,
+        aerobic_training_effect REAL,
+        anaerobic_training_effect REAL,
+        training_effect_label TEXT,
+        vo2max_value REAL,
+        start_latitude REAL,
+        start_longitude REAL,
+        end_latitude REAL,
+        end_longitude REAL,
+        location_name TEXT,
+        device_id INTEGER,
+        is_pr INTEGER,
+        has_details_synced INTEGER DEFAULT 0,
+        raw_json TEXT,
+        synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_garmin_activities_start ON garmin_activities(start_time_local)")
+
+    # Rohe Sekunden-/GPS-Zeitreihe pro Aktivität (aus get_activity_details) - nur für Aktivitäten,
+    # für die der Nutzer das explizit über die Settings-Seite angestoßen hat (kann pro Aktivität
+    # mehrere hundert Zeilen erzeugen).
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS garmin_activity_details (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        activity_id INTEGER NOT NULL,
+        seq INTEGER,
+        timestamp INTEGER,
+        latitude REAL,
+        longitude REAL,
+        elevation REAL,
+        heart_rate REAL,
+        power REAL,
+        speed REAL,
+        cadence REAL,
+        distance REAL,
+        respiration_rate REAL,
+        body_battery REAL,
+        stamina REAL,
+        vertical_oscillation REAL,
+        ground_contact_time REAL,
+        temperature REAL
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_garmin_activity_details_activity_id ON garmin_activity_details(activity_id)")
+
     conn.commit()
     conn.close()
 
