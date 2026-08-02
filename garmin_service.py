@@ -7,19 +7,21 @@ from db import save_garmin_data
 GARMIN_EMAIL = os.getenv("GARMIN_EMAIL")
 GARMIN_PASSWORD = os.getenv("GARMIN_PASSWORD")
 
-def fetch_and_store_garmin_data(target_date=None):
-    """Holt die wichtigsten Metriken für ein Datum und speichert sie in SQLite."""
+def fetch_and_store_garmin_data(target_date=None, client=None):
+    """Holt die wichtigsten Metriken für ein Datum und speichert sie in SQLite.
+    Erlaubt die Übergabe eines bestehenden Client-Objekts für Re-Use.
+    """
     if not target_date:
         target_date = date.today().isoformat()
 
-    if not GARMIN_EMAIL or not GARMIN_PASSWORD:
-        raise ValueError("GARMIN_EMAIL und GARMIN_PASSWORD müssen in .env gesetzt sein.")
+    # Wenn kein Client übergeben wurde, neu einloggen (für Einzel-Syncs im UI)
+    if client is None:
+        if not GARMIN_EMAIL or not GARMIN_PASSWORD:
+            raise ValueError("GARMIN_EMAIL und GARMIN_PASSWORD müssen in .env gesetzt sein.")
+        client = Garmin(GARMIN_EMAIL, GARMIN_PASSWORD)
+        client.login()
 
-    # Garmin Client Initialisierung
-    client = Garmin(GARMIN_EMAIL, GARMIN_PASSWORD)
-    client.login()
-
-    # API Abrufe
+    # API Abrufe (nutzen jetzt die bestehende Session!)
     stats = client.get_stats(target_date)
     sleep_data = client.get_sleep_data(target_date)
     hrv_data = client.get_hrv_data(target_date)
@@ -29,7 +31,6 @@ def fetch_and_store_garmin_data(target_date=None):
     steps = stats.get("totalSteps")
     stress_avg = stats.get("averageStressLevel")
     
-    # Schlafstunden / Score extrahieren
     sleep_score = None
     sleep_hours = None
     if sleep_data and "dailySleepDTO" in sleep_data:
@@ -38,7 +39,6 @@ def fetch_and_store_garmin_data(target_date=None):
         sleep_seconds = dto.get("sleepTimeSeconds", 0)
         sleep_hours = round(sleep_seconds / 3600.0, 2) if sleep_seconds else None
 
-    # HRV Auswertung
     avg_hrv = None
     if hrv_data and "hrvSummary" in hrv_data:
         avg_hrv = hrv_data["hrvSummary"].get("weeklyAvg") or hrv_data["hrvSummary"].get("lastNightAvg")
