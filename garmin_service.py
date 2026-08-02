@@ -1,11 +1,10 @@
-import os
 import json
+import time
+import random
 from datetime import date
-from garminconnect import Garmin
+from garminconnect import GarminConnectTooManyRequestsError
+from garmin_auth import get_garmin_client
 from db import save_garmin_data
-
-GARMIN_EMAIL = os.getenv("GARMIN_EMAIL")
-GARMIN_PASSWORD = os.getenv("GARMIN_PASSWORD")
 
 def fetch_and_store_garmin_data(target_date=None, client=None):
     """Holt die wichtigsten Metriken für ein Datum und speichert sie in SQLite.
@@ -14,23 +13,26 @@ def fetch_and_store_garmin_data(target_date=None, client=None):
     if not target_date:
         target_date = date.today().isoformat()
 
-    # Wenn kein Client übergeben wurde, neu einloggen (für Einzel-Syncs im UI)
+    # Wenn kein Client übergeben wurde, gecachten/persistierten Client nutzen
+    # statt jedes Mal neu per Passwort einzuloggen.
     if client is None:
-        if not GARMIN_EMAIL or not GARMIN_PASSWORD:
-            raise ValueError("GARMIN_EMAIL und GARMIN_PASSWORD müssen in .env gesetzt sein.")
-        client = Garmin(GARMIN_EMAIL, GARMIN_PASSWORD)
-        client.login()
+        client = get_garmin_client()
 
-    # API Abrufe (nutzen jetzt die bestehende Session!)
-    stats = client.get_stats(target_date)
-    sleep_data = client.get_sleep_data(target_date)
-    hrv_data = client.get_hrv_data(target_date)
+    # API Abrufe mit kleinen Pausen dazwischen, um Rate-Limits zu schonen
+    try:
+        stats = client.get_stats(target_date)
+        time.sleep(random.uniform(1, 2))
+        sleep_data = client.get_sleep_data(target_date)
+        time.sleep(random.uniform(1, 2))
+        hrv_data = client.get_hrv_data(target_date)
+    except GarminConnectTooManyRequestsError as e:
+        raise RuntimeError(f"429 Rate-Limit bei {target_date}: {e}") from e
 
     # Daten-Transformation & Fallbacks
     resting_hr = stats.get("restingHeartRate")
     steps = stats.get("totalSteps")
     stress_avg = stats.get("averageStressLevel")
-    
+
     sleep_score = None
     sleep_hours = None
     if sleep_data and "dailySleepDTO" in sleep_data:
