@@ -29,23 +29,23 @@ def run_backfill(start_date: date, end_date: date, client, on_progress=None):
             fetch_and_store_garmin_data(date_str, client=client)
             success_count += 1
             if on_progress:
-                on_progress(current_date, "ok", success_count, error_count, total_days)
+                on_progress(current_date, "ok", success_count, error_count, total_days, None)
             current_date += timedelta(days=1)
             time.sleep(random.uniform(8, 15))
         except GarminConnectTooManyRequestsError as e:
             if on_progress:
-                on_progress(current_date, "rate_limited", success_count, error_count, total_days)
+                on_progress(current_date, "rate_limited", success_count, error_count, total_days, str(e))
             stopped_early = True
             break
         except Exception as e:
             if "429" in str(e):
                 if on_progress:
-                    on_progress(current_date, "rate_limited", success_count, error_count, total_days)
+                    on_progress(current_date, "rate_limited", success_count, error_count, total_days, str(e))
                 stopped_early = True
                 break
             error_count += 1
             if on_progress:
-                on_progress(current_date, "error", success_count, error_count, total_days)
+                on_progress(current_date, "error", success_count, error_count, total_days, str(e))
             current_date += timedelta(days=1)
             time.sleep(random.uniform(3, 6))
 

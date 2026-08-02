@@ -61,18 +61,20 @@ elif st.button("Backfill starten 🚀"):
         client = None
 
     if client:
-        def on_progress(current_date, status, success_count, error_count, total):
+        def on_progress(current_date, status, success_count, error_count, total, error_detail=None):
             done = success_count + error_count
             progress_bar.progress(min(done / total, 1.0))
             if status == "ok":
                 status_placeholder.write(f"✅ {current_date.isoformat()} gespeichert")
             elif status == "rate_limited":
+                detail = f" ({error_detail})" if error_detail else ""
                 status_placeholder.error(
-                    f"🛑 Rate-Limit erreicht bei {current_date.isoformat()} — Backfill abgebrochen, "
+                    f"🛑 Rate-Limit erreicht bei {current_date.isoformat()}{detail} — Backfill abgebrochen, "
                     "um die Sperre nicht zu verlängern."
                 )
             else:
-                status_placeholder.warning(f"❌ Fehler bei {current_date.isoformat()}")
+                detail = f": {error_detail}" if error_detail else ""
+                status_placeholder.warning(f"❌ Fehler bei {current_date.isoformat()}{detail}")
 
         success_count, error_count, stopped_early = run_backfill(
             backfill_start, backfill_end, client, on_progress=on_progress

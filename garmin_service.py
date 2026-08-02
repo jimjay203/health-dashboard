@@ -200,9 +200,17 @@ def _fetch_advanced_health(client, target_date):
 
     training_status = _safe_call(client, "get_training_status", lambda c: c.get_training_status(target_date))
     if training_status:
+        # mostRecentVO2Max ist kein einfacher Zahlenwert, sondern ein verschachteltes Objekt mit
+        # getrennten Werten für Laufen ("generic") und Radfahren ("cycling") - an Tagen ohne
+        # aktuelle Messung ist es dagegen schlicht null. Beide Fälle abfangen statt den rohen
+        # Wert (der dann mal dict, mal None ist) direkt in die REAL-Spalte zu schreiben.
+        vo2max_data = training_status.get("mostRecentVO2Max") or {}
+        vo2max_generic = vo2max_data.get("generic") or {}
+        vo2max_cycling = vo2max_data.get("cycling") or {}
         upsert_daily_metric("garmin_training_status", {
             "date": target_date,
-            "most_recent_vo2max": training_status.get("mostRecentVO2Max"),
+            "most_recent_vo2max": vo2max_generic.get("vo2MaxPreciseValue") or vo2max_generic.get("vo2MaxValue"),
+            "most_recent_vo2max_cycling": vo2max_cycling.get("vo2MaxPreciseValue") or vo2max_cycling.get("vo2MaxValue"),
             "training_load_balance": json.dumps(training_status.get("mostRecentTrainingLoadBalance"))
                 if training_status.get("mostRecentTrainingLoadBalance") else None,
             "training_status": json.dumps(training_status.get("mostRecentTrainingStatus"))

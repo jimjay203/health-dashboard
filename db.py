@@ -174,6 +174,7 @@ def init_db():
         "garmin_training_status": """
             date TEXT PRIMARY KEY,
             most_recent_vo2max REAL,
+            most_recent_vo2max_cycling REAL,
             training_load_balance TEXT,
             training_status TEXT,
             raw_json TEXT,
@@ -278,6 +279,10 @@ def init_db():
     for column, coltype in endurance_score_columns.items():
         if column not in existing_columns:
             cursor.execute(f"ALTER TABLE garmin_endurance_score ADD COLUMN {column} {coltype}")
+
+    existing_columns = {row[1] for row in cursor.execute("PRAGMA table_info(garmin_training_status)")}
+    if "most_recent_vo2max_cycling" not in existing_columns:
+        cursor.execute("ALTER TABLE garmin_training_status ADD COLUMN most_recent_vo2max_cycling REAL")
 
     # Zeitreihen-Tabellen: mehrere Zeilen pro Datum, komplett ersetzt über replace_timeseries()
     timeseries_tables = {
