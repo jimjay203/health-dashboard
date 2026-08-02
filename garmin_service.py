@@ -1,14 +1,40 @@
 import json
 import time
 import random
-from datetime import date
+from datetime import date, timedelta
 from garminconnect import GarminConnectTooManyRequestsError
 from garmin_auth import get_garmin_client
-from db import save_garmin_data
+from db import save_garmin_data, upsert_daily_metric, replace_timeseries, upsert_weigh_in, upsert_by_key
+
+
+def _pause():
+    # Tempo von garmin_explore.py übernommen, das nachweislich 30 Endpunkte am Stück
+    # ohne 429 durchbekommt - kürzere Pausen hatten die Erweiterung ins Wackeln gebracht.
+    time.sleep(random.uniform(2, 4))
+
+
+def _safe_call(client, label, func):
+    """Ruft einen einzelnen Garmin-Endpunkt auf. Ein 429 wird durchgereicht und bricht
+    den gesamten Sync ab (siehe fetch_and_store_garmin_data); alle anderen Fehler
+    (z.B. Endpunkt für dieses Gerät/Konto nicht verfügbar) werden geloggt und übersprungen,
+    damit ein einzelner fehlender Datentyp nicht den ganzen Tages-Sync killt.
+    """
+    try:
+        result = func(client)
+        _pause()
+        return result
+    except GarminConnectTooManyRequestsError:
+        raise
+    except Exception as e:
+        if "429" in str(e):
+            raise
+        print(f"⚠️  {label} übersprungen: {e}")
+        return None
+
 
 def fetch_and_store_garmin_data(target_date=None, client=None):
-    """Holt die wichtigsten Metriken für ein Datum und speichert sie in SQLite.
-    Erlaubt die Übergabe eines bestehenden Client-Objekts für Re-Use.
+    """Holt die Kern-Metriken sowie alle erweiterten Metrik-Gruppen für ein Datum und
+    speichert sie in SQLite. Erlaubt die Übergabe eines bestehenden Client-Objekts für Re-Use.
     """
     if not target_date:
         target_date = date.today().isoformat()
@@ -18,17 +44,20 @@ def fetch_and_store_garmin_data(target_date=None, client=None):
     if client is None:
         client = get_garmin_client()
 
-    # API Abrufe mit kleinen Pausen dazwischen, um Rate-Limits zu schonen
+    # --- Kern-Metriken (garmin_daily), wie bisher ---
     try:
         stats = client.get_stats(target_date)
-        time.sleep(random.uniform(1, 2))
+        _pause()
         sleep_data = client.get_sleep_data(target_date)
-        time.sleep(random.uniform(1, 2))
+        _pause()
         hrv_data = client.get_hrv_data(target_date)
+        _pause()
     except GarminConnectTooManyRequestsError as e:
         raise RuntimeError(f"429 Rate-Limit bei {target_date}: {e}") from e
 
-    # Daten-Transformation & Fallbacks
+    # Garmin liefert für Tage ohne Sync/Tragezeit der Uhr manchmal None statt eines dict
+    stats = stats or {}
+
     resting_hr = stats.get("restingHeartRate")
     steps = stats.get("totalSteps")
     stress_avg = stats.get("averageStressLevel")
@@ -37,7 +66,7 @@ def fetch_and_store_garmin_data(target_date=None, client=None):
     sleep_hours = None
     if sleep_data and "dailySleepDTO" in sleep_data:
         dto = sleep_data["dailySleepDTO"]
-        sleep_score = dto.get("sleepScores", {}).get("overall", {}).get("value")
+        sleep_score = ((dto.get("sleepScores") or {}).get("overall") or {}).get("value")
         sleep_seconds = dto.get("sleepTimeSeconds", 0)
         sleep_hours = round(sleep_seconds / 3600.0, 2) if sleep_seconds else None
 
@@ -57,9 +86,498 @@ def fetch_and_store_garmin_data(target_date=None, client=None):
         "steps": steps,
         "raw_json": json.dumps({"stats": stats, "sleep": sleep_data, "hrv": hrv_data})
     }
-
     save_garmin_data(db_payload)
+
+    # --- Erweiterte Metrik-Gruppen ---
+    _fetch_advanced_health(client, target_date)
+    _fetch_trends_and_wellness(client, target_date)
+    _fetch_body_composition(client, target_date)
+    _fetch_goals_and_performance(client, target_date)
+
     return db_payload
+
+
+def _fetch_advanced_health(client, target_date):
+    """Advanced Health Metrics: Training Readiness, Fitness-Alter, Max Metrics,
+    Atmung, SpO2, Laktatschwelle, Trainingsstatus, Running Tolerance, Intensity Minutes."""
+
+    readiness = _safe_call(client, "get_training_readiness", lambda c: c.get_training_readiness(target_date))
+    readiness_entry = readiness[0] if isinstance(readiness, list) and readiness else readiness
+    if readiness_entry:
+        upsert_daily_metric("garmin_training_readiness", {
+            "date": target_date,
+            "score": readiness_entry.get("score"),
+            "level": readiness_entry.get("level"),
+            "feedback_long": readiness_entry.get("feedbackLong"),
+            "feedback_short": readiness_entry.get("feedbackShort"),
+            "sleep_score": readiness_entry.get("sleepScore"),
+            "sleep_score_factor_percent": readiness_entry.get("sleepScoreFactorPercent"),
+            "sleep_score_factor_feedback": readiness_entry.get("sleepScoreFactorFeedback"),
+            "recovery_time": readiness_entry.get("recoveryTime"),
+            "recovery_time_factor_percent": readiness_entry.get("recoveryTimeFactorPercent"),
+            "recovery_time_factor_feedback": readiness_entry.get("recoveryTimeFactorFeedback"),
+            "acwr_factor_percent": readiness_entry.get("acwrFactorPercent"),
+            "acwr_factor_feedback": readiness_entry.get("acwrFactorFeedback"),
+            "hrv_factor_percent": readiness_entry.get("hrvFactorPercent"),
+            "hrv_factor_feedback": readiness_entry.get("hrvFactorFeedback"),
+            "hrv_weekly_average": readiness_entry.get("hrvWeeklyAverage"),
+            "sleep_history_factor_percent": readiness_entry.get("sleepHistoryFactorPercent"),
+            "sleep_history_factor_feedback": readiness_entry.get("sleepHistoryFactorFeedback"),
+            "stress_history_factor_percent": readiness_entry.get("stressHistoryFactorPercent"),
+            "stress_history_factor_feedback": readiness_entry.get("stressHistoryFactorFeedback"),
+        })
+
+    fitness_age = _safe_call(client, "get_fitnessage_data", lambda c: c.get_fitnessage_data(target_date))
+    if fitness_age:
+        components = fitness_age.get("components") or {}
+        upsert_daily_metric("garmin_fitness_age", {
+            "date": target_date,
+            "chronological_age": fitness_age.get("chronologicalAge"),
+            "fitness_age": fitness_age.get("fitnessAge"),
+            "achievable_fitness_age": fitness_age.get("achievableFitnessAge"),
+            "previous_fitness_age": fitness_age.get("previousFitnessAge"),
+            "rhr_value": (components.get("rhr") or {}).get("value"),
+            "bmi_value": (components.get("bmi") or {}).get("value"),
+            "vigorous_days_avg": (components.get("vigorousDaysAvg") or {}).get("value"),
+            "vigorous_minutes_avg": (components.get("vigorousMinutesAvg") or {}).get("value"),
+            "last_updated": fitness_age.get("lastUpdated"),
+        })
+
+    max_metrics = _safe_call(client, "get_max_metrics", lambda c: c.get_max_metrics(target_date))
+    if max_metrics:
+        entry = max_metrics[0] if isinstance(max_metrics, list) else max_metrics
+        generic = (entry.get("generic") or {}) if isinstance(entry, dict) else {}
+        cycling = (entry.get("cycling") or {}) if isinstance(entry, dict) else {}
+        upsert_daily_metric("garmin_max_metrics", {
+            "date": target_date,
+            "vo2max_running": generic.get("vo2MaxPreciseValue") or generic.get("vo2MaxValue"),
+            "vo2max_cycling": cycling.get("vo2MaxPreciseValue") or cycling.get("vo2MaxValue"),
+            "raw_json": json.dumps(max_metrics),
+        })
+
+    respiration = _safe_call(client, "get_respiration_data", lambda c: c.get_respiration_data(target_date))
+    if respiration:
+        upsert_daily_metric("garmin_respiration_summary", {
+            "date": target_date,
+            "lowest": respiration.get("lowestRespirationValue"),
+            "highest": respiration.get("highestRespirationValue"),
+            "avg_waking": respiration.get("avgWakingRespirationValue"),
+            "avg_sleep": respiration.get("avgSleepRespirationValue"),
+        })
+        rows = [
+            (target_date, ts, val)
+            for ts, val in (respiration.get("respirationValuesArray") or [])
+        ]
+        replace_timeseries("garmin_respiration_timeseries", target_date, ["date", "timestamp", "respiration_value"], rows)
+
+    spo2 = _safe_call(client, "get_spo2_data", lambda c: c.get_spo2_data(target_date))
+    if spo2:
+        upsert_daily_metric("garmin_spo2", {
+            "date": target_date,
+            "average_spo2": spo2.get("averageSpO2"),
+            "lowest_spo2": spo2.get("lowestSpO2"),
+            "last_7d_avg_spo2": spo2.get("lastSevenDaysAvgSpO2"),
+            "latest_spo2": spo2.get("latestSpO2"),
+            "avg_sleep_spo2": spo2.get("avgSleepSpO2"),
+        })
+
+    # get_lactate_threshold(latest=True) ignoriert das Datum komplett und liefert immer
+    # Garmins aktuellen Stand - bei einem Backfill über mehrere Tage nur einmal für "heute"
+    # abrufen, sonst wird derselbe Wert unter jedem Tag unnötig neu abgefragt und gespeichert.
+    if target_date == date.today().isoformat():
+        lactate = _safe_call(client, "get_lactate_threshold", lambda c: c.get_lactate_threshold(latest=True))
+        if lactate:
+            speed_hr = lactate.get("speed_and_heart_rate", {}) or {}
+            power = lactate.get("power", {}) or {}
+            upsert_daily_metric("garmin_lactate_threshold", {
+                "date": target_date,
+                "speed": speed_hr.get("speed"),
+                "heart_rate": speed_hr.get("heartRate"),
+                "heart_rate_cycling": speed_hr.get("heartRateCycling"),
+                "functional_threshold_power": power.get("functionalThresholdPower"),
+                "power_to_weight": power.get("powerToWeight"),
+            })
+
+    training_status = _safe_call(client, "get_training_status", lambda c: c.get_training_status(target_date))
+    if training_status:
+        upsert_daily_metric("garmin_training_status", {
+            "date": target_date,
+            "most_recent_vo2max": training_status.get("mostRecentVO2Max"),
+            "training_load_balance": json.dumps(training_status.get("mostRecentTrainingLoadBalance"))
+                if training_status.get("mostRecentTrainingLoadBalance") else None,
+            "training_status": json.dumps(training_status.get("mostRecentTrainingStatus"))
+                if training_status.get("mostRecentTrainingStatus") else None,
+            "raw_json": json.dumps(training_status),
+        })
+
+    running_tolerance = _safe_call(
+        client, "get_running_tolerance",
+        lambda c: c.get_running_tolerance(target_date, target_date)
+    )
+    tolerance_entry = running_tolerance[0] if isinstance(running_tolerance, list) and running_tolerance else running_tolerance
+    if tolerance_entry:
+        upsert_daily_metric("garmin_running_tolerance", {
+            "date": target_date,
+            "total_impact_load": tolerance_entry.get("totalImpactLoad"),
+            "total_distance": tolerance_entry.get("totalDistance"),
+            "tolerance": tolerance_entry.get("tolerance"),
+            "week_index": tolerance_entry.get("weekIndex"),
+        })
+
+    intensity = _safe_call(client, "get_intensity_minutes_data", lambda c: c.get_intensity_minutes_data(target_date))
+    if intensity:
+        upsert_daily_metric("garmin_intensity_minutes", {
+            "date": target_date,
+            "weekly_moderate": intensity.get("weeklyModerate"),
+            "weekly_vigorous": intensity.get("weeklyVigorous"),
+            "weekly_total": intensity.get("weeklyTotal"),
+            "week_goal": intensity.get("weekGoal"),
+            "moderate_minutes": intensity.get("moderateMinutes"),
+            "vigorous_minutes": intensity.get("vigorousMinutes"),
+        })
+
+
+def _fetch_trends_and_wellness(client, target_date):
+    """Historical Data & Trends + Hydration & Wellness: Stress/Body-Battery-Zeitreihen,
+    Body-Battery-Events, Etagen, Blutdruck, Herzfrequenz-Zeitreihe, Schritte, Atemminuten,
+    Hydration, Lifestyle-Logging, Ernährung, All-Day-Events."""
+
+    # get_stress_data und get_all_day_stress liefern identischen Content (verifiziert per diff) -
+    # nur einmal abrufen, deckt Stress- UND Body-Battery-Zeitreihe ab.
+    all_day_stress = _safe_call(client, "get_all_day_stress", lambda c: c.get_all_day_stress(target_date))
+    if all_day_stress:
+        stress_rows = [
+            (target_date, ts, level)
+            for ts, level in (all_day_stress.get("stressValuesArray") or [])
+        ]
+        replace_timeseries("garmin_stress_timeseries", target_date, ["date", "timestamp", "stress_level"], stress_rows)
+
+        bb_rows = [
+            (target_date, entry[0], entry[1], entry[2])
+            for entry in (all_day_stress.get("bodyBatteryValuesArray") or [])
+        ]
+        replace_timeseries(
+            "garmin_body_battery_timeseries", target_date,
+            ["date", "timestamp", "status", "level"], bb_rows
+        )
+
+    bb_events = _safe_call(client, "get_body_battery_events", lambda c: c.get_body_battery_events(target_date))
+    if bb_events:
+        rows = []
+        for item in bb_events:
+            event = item.get("event", {}) or {}
+            rows.append((
+                target_date,
+                event.get("eventType"),
+                event.get("eventStartTimeGmt"),
+                event.get("durationInMilliseconds"),
+                event.get("bodyBatteryImpact"),
+                item.get("activityName"),
+                item.get("activityType"),
+                item.get("averageStress"),
+            ))
+        replace_timeseries(
+            "garmin_body_battery_events", target_date,
+            ["date", "event_type", "start_time_gmt", "duration_ms", "body_battery_impact",
+             "activity_name", "activity_type", "average_stress"],
+            rows
+        )
+
+    floors = _safe_call(client, "get_floors", lambda c: c.get_floors(target_date))
+    if floors:
+        rows = [
+            (target_date, start, end, up, down)
+            for start, end, up, down in (floors.get("floorValuesArray") or [])
+        ]
+        replace_timeseries(
+            "garmin_floors_timeseries", target_date,
+            ["date", "start_time_gmt", "end_time_gmt", "floors_ascended", "floors_descended"],
+            rows
+        )
+
+    heart_rates = _safe_call(client, "get_heart_rates", lambda c: c.get_heart_rates(target_date))
+    if heart_rates:
+        upsert_daily_metric("garmin_heart_rate_summary", {
+            "date": target_date,
+            "max_hr": heart_rates.get("maxHeartRate"),
+            "min_hr": heart_rates.get("minHeartRate"),
+            "resting_hr": heart_rates.get("restingHeartRate"),
+            "last_7d_avg_resting_hr": heart_rates.get("lastSevenDaysAvgRestingHeartRate"),
+        })
+        rows = [
+            (target_date, ts, hr)
+            for ts, hr in (heart_rates.get("heartRateValues") or [])
+        ]
+        replace_timeseries("garmin_heart_rate_timeseries", target_date, ["date", "timestamp", "heart_rate"], rows)
+
+    steps = _safe_call(client, "get_steps_data", lambda c: c.get_steps_data(target_date))
+    if steps:
+        rows = [
+            (target_date, s.get("startGMT"), s.get("endGMT"), s.get("steps"),
+             s.get("pushes"), s.get("primaryActivityLevel"))
+            for s in steps
+        ]
+        replace_timeseries(
+            "garmin_steps_timeseries", target_date,
+            ["date", "start_gmt", "end_gmt", "steps", "pushes", "primary_activity_level"],
+            rows
+        )
+
+    blood_pressure = _safe_call(
+        client, "get_blood_pressure",
+        lambda c: c.get_blood_pressure(target_date, target_date)
+    )
+    if blood_pressure:
+        summaries = blood_pressure.get("measurementSummaries") or []
+        latest = summaries[-1] if summaries else {}
+        upsert_daily_metric("garmin_blood_pressure", {
+            "date": target_date,
+            "systolic": latest.get("systolic"),
+            "diastolic": latest.get("diastolic"),
+            "pulse": latest.get("pulse"),
+            "category": latest.get("category"),
+            "raw_json": json.dumps(blood_pressure),
+        })
+
+    lifestyle = _safe_call(client, "get_lifestyle_logging_data", lambda c: c.get_lifestyle_logging_data(target_date))
+    if lifestyle:
+        stats_for_date = next(
+            (s for s in (lifestyle.get("completionStats") or []) if s.get("calendarDate") == target_date),
+            None
+        )
+        if stats_for_date:
+            upsert_daily_metric("garmin_lifestyle_logging", {
+                "date": target_date,
+                "total_tracking": stats_for_date.get("totalTracking"),
+                "completed_tracking": stats_for_date.get("completedTracking"),
+            })
+
+    hydration = _safe_call(client, "get_hydration_data", lambda c: c.get_hydration_data(target_date))
+    if hydration:
+        upsert_daily_metric("garmin_hydration", {
+            "date": target_date,
+            "value_ml": hydration.get("valueInML"),
+            "goal_ml": hydration.get("goalInML"),
+            "daily_average_ml": hydration.get("dailyAverageinML"),
+            "sweat_loss_ml": hydration.get("sweatLossInML"),
+            "activity_intake_ml": hydration.get("activityIntakeInML"),
+        })
+
+    all_day_events = _safe_call(client, "get_all_day_events", lambda c: c.get_all_day_events(target_date))
+    if all_day_events:
+        rows = [
+            (target_date, e.get("activityType"), e.get("activitySubType"),
+             e.get("startTimestampGMT"), e.get("endTimestampGMT"), e.get("duration"))
+            for e in all_day_events
+        ]
+        replace_timeseries(
+            "garmin_all_day_events", target_date,
+            ["date", "activity_type", "activity_sub_type", "start_time_gmt", "end_time_gmt", "duration"],
+            rows
+        )
+
+    food_log = _safe_call(client, "get_nutrition_daily_food_log", lambda c: c.get_nutrition_daily_food_log(target_date))
+    if food_log:
+        goals = food_log.get("dailyNutritionGoals", {}) or {}
+        upsert_daily_metric("garmin_nutrition_daily", {
+            "date": target_date,
+            "calories_goal": goals.get("calories"),
+            "calories_adjusted": goals.get("adjustedCalories"),
+            "raw_json": json.dumps(food_log),
+        })
+
+    pregnancy = _safe_call(client, "get_pregnancy_summary", lambda c: c.get_pregnancy_summary())
+    if pregnancy:
+        upsert_daily_metric("garmin_pregnancy_summary", {
+            "date": target_date,
+            "raw_json": json.dumps(pregnancy),
+        })
+
+
+def _fetch_body_composition(client, target_date):
+    """Body Composition & Weight + Goals & Achievements (Renn-Prognosen).
+    get_body_composition liefert nur ein selbst-herleitbares Aggregat über get_weigh_ins hinaus
+    (totalAverage) und wird daher nicht separat gespeichert - siehe Projektnotiz zu Redundanzen."""
+
+    weigh_ins = _safe_call(
+        client, "get_weigh_ins",
+        lambda c: c.get_weigh_ins(target_date, target_date)
+    )
+    if weigh_ins:
+        for summary in weigh_ins.get("dailyWeightSummaries") or []:
+            for entry in summary.get("allWeightMetrics") or []:
+                sample_pk = entry.get("samplePk")
+                if sample_pk is None:
+                    continue
+                upsert_weigh_in({
+                    "sample_pk": sample_pk,
+                    "date": entry.get("calendarDate") or target_date,
+                    "weight": entry.get("weight"),
+                    "bmi": entry.get("bmi"),
+                    "body_fat": entry.get("bodyFat"),
+                    "body_water": entry.get("bodyWater"),
+                    "bone_mass": entry.get("boneMass"),
+                    "muscle_mass": entry.get("muscleMass"),
+                    "physique_rating": entry.get("physiqueRating"),
+                    "visceral_fat": entry.get("visceralFat"),
+                    "metabolic_age": entry.get("metabolicAge"),
+                    "source_type": entry.get("sourceType"),
+                    "timestamp_gmt": entry.get("timestampGMT"),
+                })
+
+    # get_race_predictions() kennt kein Datum - liefert immer Garmins aktuelle Prognose.
+    # Nur für "heute" abrufen (siehe gleiche Begründung bei get_lactate_threshold oben);
+    # Garmin bietet ohnehin keine historische Abfrage dafür an.
+    if target_date == date.today().isoformat():
+        race_predictions = _safe_call(client, "get_race_predictions", lambda c: c.get_race_predictions())
+        if race_predictions:
+            upsert_daily_metric("garmin_race_predictions", {
+                "date": target_date,
+                "time_5k": race_predictions.get("time5K"),
+                "time_10k": race_predictions.get("time10K"),
+                "time_half_marathon": race_predictions.get("timeHalfMarathon"),
+                "time_marathon": race_predictions.get("timeMarathon"),
+            })
+
+
+def _add_months(year, month, offset):
+    total = (year * 12 + (month - 1)) + offset
+    return total // 12, total % 12 + 1
+
+
+def _fetch_goals_and_performance(client, target_date):
+    """Goals & Achievements (erweitert): Endurance/Hill Score, Cycling FTP, Personal Records,
+    Goals, Trainingspläne, geplante Events/Rennen (Kalender)."""
+
+    endurance = _safe_call(client, "get_endurance_score", lambda c: c.get_endurance_score(target_date, target_date))
+    if endurance:
+        dto = endurance.get("enduranceScoreDTO") or {}
+        entry_date = dto.get("calendarDate") or target_date
+        upsert_daily_metric("garmin_endurance_score", {
+            "date": entry_date,
+            "overall_score": dto.get("overallScore"),
+            "classification": dto.get("classification"),
+            "feedback_phrase": dto.get("feedbackPhrase"),
+            "gauge_lower_limit": dto.get("gaugeLowerLimit"),
+            "gauge_upper_limit": dto.get("gaugeUpperLimit"),
+            "classification_intermediate": dto.get("classificationLowerLimitIntermediate"),
+            "classification_trained": dto.get("classificationLowerLimitTrained"),
+            "classification_well_trained": dto.get("classificationLowerLimitWellTrained"),
+            "classification_expert": dto.get("classificationLowerLimitExpert"),
+            "classification_superior": dto.get("classificationLowerLimitSuperior"),
+            "classification_elite": dto.get("classificationLowerLimitElite"),
+        })
+
+    hill = _safe_call(client, "get_hill_score", lambda c: c.get_hill_score(target_date, target_date))
+    if hill:
+        hill_entry = next(
+            (h for h in (hill.get("hillScoreDTOList") or []) if h.get("calendarDate") == target_date),
+            None
+        )
+        if hill_entry:
+            upsert_daily_metric("garmin_hill_score", {
+                "date": target_date,
+                "strength_score": hill_entry.get("strengthScore"),
+                "endurance_score": hill_entry.get("enduranceScore"),
+                "overall_score": hill_entry.get("overallScore"),
+                "classification_id": hill_entry.get("hillScoreClassificationId"),
+                "feedback_phrase_id": hill_entry.get("hillScoreFeedbackPhraseId"),
+                "vo2_max": hill_entry.get("vo2MaxPreciseValue") or hill_entry.get("vo2Max"),
+            })
+
+    # Die folgenden Endpunkte kennen kein Datum bzw. liefern immer den aktuellen Gesamtstand
+    # (Account-weite Bestzeiten, Ziele, Pläne, FTP) - wie bei get_race_predictions nur für
+    # "heute" abrufen, sonst wird derselbe Stand bei jedem Backfill-Tag unnötig neu geholt.
+    if target_date != date.today().isoformat():
+        return
+
+    ftp = _safe_call(client, "get_cycling_ftp", lambda c: c.get_cycling_ftp())
+    if ftp:
+        upsert_daily_metric("garmin_cycling_ftp", {
+            "date": target_date,
+            "functional_threshold_power": ftp.get("functionalThresholdPower"),
+            "measured_date": ftp.get("calendarDate"),
+            "is_stale": int(ftp.get("isStale")) if ftp.get("isStale") is not None else None,
+        })
+
+    personal_records = _safe_call(client, "get_personal_record", lambda c: c.get_personal_record())
+    if personal_records:
+        for pr in personal_records:
+            pr_id = pr.get("id")
+            if pr_id is None:
+                continue
+            upsert_by_key("garmin_personal_records", "id", {
+                "id": pr_id,
+                "type_id": pr.get("typeId"),
+                "activity_id": pr.get("activityId"),
+                "activity_name": pr.get("activityName"),
+                "activity_type": pr.get("activityType"),
+                "value": pr.get("value"),
+                "activity_start_date": pr.get("actStartDateTimeInGMTFormatted"),
+                "pr_date": pr.get("prStartTimeGmtFormatted"),
+            })
+
+    for status in ("active", "future"):
+        goals = _safe_call(client, f"get_goals[{status}]", lambda c, s=status: c.get_goals(status=s))
+        if goals:
+            for goal in goals:
+                goal_id = goal.get("goalId") or goal.get("id")
+                if goal_id is None:
+                    continue
+                upsert_by_key("garmin_goals", "id", {
+                    "id": goal_id,
+                    "status": status,
+                    "raw_json": json.dumps(goal),
+                })
+
+    training_plans = _safe_call(client, "get_training_plans", lambda c: c.get_training_plans())
+    if training_plans:
+        for plan in training_plans.get("trainingPlanList") or []:
+            plan_id = plan.get("trainingPlanId") or plan.get("id")
+            if plan_id is None:
+                continue
+            upsert_by_key("garmin_training_plans", "id", {
+                "id": plan_id,
+                "raw_json": json.dumps(plan),
+            })
+
+    # Geplante Events/Rennen: aktueller Monat + die zwei folgenden - reicht, um bevorstehende
+    # Rennen (z.B. den Marathon) zuverlässig zu sehen, ohne jeden Monat der Zukunft abzufragen.
+    today = date.today()
+    for offset in range(0, 3):
+        year, month = _add_months(today.year, today.month, offset)
+        period = f"{year:04d}-{month:02d}"
+        scheduled = _safe_call(
+            client, f"get_scheduled_workouts[{period}]",
+            lambda c, y=year, m=month: c.get_scheduled_workouts(y, m)
+        )
+        if scheduled is None:
+            continue
+        rows = []
+        for item in scheduled.get("calendarItems") or []:
+            completion_target = item.get("completionTarget") or {}
+            distance_meters = completion_target.get("value") if completion_target.get("unit") == "meter" else None
+            rows.append((
+                period,
+                item.get("date"),
+                item.get("itemType"),
+                item.get("activityTypeId"),
+                item.get("title"),
+                int(bool(item.get("isRace"))),
+                distance_meters,
+                item.get("location"),
+                item.get("url"),
+                item.get("shareableEventUuid"),
+                item.get("workoutId"),
+                item.get("trainingPlanId"),
+            ))
+        replace_timeseries(
+            "garmin_scheduled_events", period,
+            ["date", "event_date", "item_type", "activity_type_id", "title", "is_race",
+             "distance_meters", "location", "url", "shareable_event_uuid", "workout_id", "training_plan_id"],
+            rows
+        )
+
 
 if __name__ == "__main__":
     print("Teste Garmin-Import für heute...")

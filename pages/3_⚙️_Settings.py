@@ -3,6 +3,7 @@ from datetime import date, timedelta
 from garmin_auth import get_garmin_client
 from garmin_service import fetch_and_store_garmin_data
 from garmin_backfill import run_backfill
+from garmin_explore import run_exploration
 from db import init_db
 
 st.set_page_config(page_title="Einstellungen & Data Engine", page_icon="⚙️")
@@ -89,3 +90,48 @@ elif st.button("Backfill starten 🚀"):
             st.success(
                 f"🎉 Backfill abgeschlossen! Erfolgreich: {success_count}, Fehler: {error_count}"
             )
+
+st.divider()
+
+st.subheader("🔬 API-Exploration (Tier 1 & 2 Testabruf)")
+st.caption(
+    "Ruft alle vorgesehenen Endpunkte einmal ab und zeigt die rohen JSON-Antworten an. "
+    "Läuft im selben Prozess wie der Einzel-Sync oben, um Token-Probleme separater Prozesse zu vermeiden. "
+    "Ergebnisse werden zusätzlich unter garmin_api_exploration/ gespeichert."
+)
+
+if st.button("Exploration starten 🧪"):
+    explore_progress = st.progress(0)
+    explore_status = st.empty()
+
+    try:
+        client = get_garmin_client()
+    except Exception as e:
+        st.error(f"Konnte keine Garmin-Session herstellen: {e}")
+        client = None
+
+    if client:
+        def on_explore_progress(name, index, total, status, data_or_error):
+            explore_progress.progress(min(index / total, 1.0))
+            if status == "ok":
+                explore_status.write(f"✅ [{index}/{total}] {name}")
+            elif status == "rate_limited":
+                explore_status.error(
+                    f"🛑 Rate-Limit erreicht bei {name} ({index}/{total}) — Test abgebrochen."
+                )
+            else:
+                explore_status.warning(f"❌ [{index}/{total}] {name}: {data_or_error}")
+
+        results = run_exploration(client, on_progress=on_explore_progress)
+        explore_progress.progress(1.0)
+
+        success_count = sum(1 for r in results.values() if r["success"])
+        error_count = len(results) - success_count
+        st.success(f"Fertig! Erfolgreich: {success_count}, Fehler: {error_count}")
+
+        for name, result in results.items():
+            with st.expander(f"{'✅' if result['success'] else '❌'} {name}"):
+                if result["success"]:
+                    st.json(result["data"])
+                else:
+                    st.error(result["error"])

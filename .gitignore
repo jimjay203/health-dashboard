@@ -11,3 +11,6 @@ venv/
 .DS_Store
 *.sqlite3
 data/
+
+# Rohe API-Exploration (enthält echte persönliche Daten: GPS, Gewicht, HF, Profilbilder...)
+garmin_api_exploration/

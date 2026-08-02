@@ -31,7 +31,7 @@ def run_backfill(start_date: date, end_date: date, client, on_progress=None):
             if on_progress:
                 on_progress(current_date, "ok", success_count, error_count, total_days)
             current_date += timedelta(days=1)
-            time.sleep(random.uniform(3, 6))
+            time.sleep(random.uniform(8, 15))
         except GarminConnectTooManyRequestsError as e:
             if on_progress:
                 on_progress(current_date, "rate_limited", success_count, error_count, total_days)
