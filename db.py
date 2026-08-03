@@ -333,6 +333,14 @@ def init_db():
     if "power_to_weight" not in existing_columns:
         cursor.execute("ALTER TABLE garmin_cycling_ftp ADD COLUMN power_to_weight REAL")
 
+    # Chronic/Acute Training Load (PMC-Modell, siehe daily_summary.py) - Erweiterung der
+    # bestehenden daily_summary-Tabelle um EWMA-basierte Fitness-/Frische-Kennzahlen.
+    daily_summary_columns = {"ctl": "REAL", "atl": "REAL", "tsb": "REAL"}
+    existing_columns = {row[1] for row in cursor.execute("PRAGMA table_info(daily_summary)")}
+    for column, coltype in daily_summary_columns.items():
+        if column not in existing_columns:
+            cursor.execute(f"ALTER TABLE daily_summary ADD COLUMN {column} {coltype}")
+
     # Zeitreihen-Tabellen: mehrere Zeilen pro Datum, komplett ersetzt über replace_timeseries()
     timeseries_tables = {
         "garmin_stress_timeseries": """

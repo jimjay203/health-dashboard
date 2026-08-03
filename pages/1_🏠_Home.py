@@ -256,7 +256,7 @@ if daily_summary_row:
         else:
             st.info(f"ℹ️ {daily_summary_row['notable_events_text']}")
 
-    ns1, ns2, ns3, ns4 = st.columns(4)
+    ns1, ns2, ns3, ns4, ns5 = st.columns(5)
     with ns1:
         val = daily_summary_row["hrv_vs_7d_avg_pct"]
         st.metric("HRV vs. Ø 7 Tage", f"{val:+.0f}%" if val is not None else "--",
@@ -275,6 +275,16 @@ if daily_summary_row:
         st.metric("Schlafschuld (14 T.)", f"{val:+.1f} h" if val is not None else "--",
                    help="Rollierende Abweichung von deinem individuellen Schlafbedarf (Garmins sleepNeed, "
                         "sonst 8h) über die letzten 14 Tage.")
+    with ns5:
+        val = daily_summary_row["tsb"]
+        ctl_val, atl_val = daily_summary_row["ctl"], daily_summary_row["atl"]
+        st.metric("Form (TSB)", f"{val:+.1f}" if val is not None else "--",
+                   help="Training Stress Balance = Fitness (CTL, 42-Tage-EWMA der Trainingslast) minus "
+                        "Ermüdung (ATL, 7-Tage-EWMA). Positiv = frisch/erholt, negativ = ermüdet."
+                        + (f" Aktuell CTL {ctl_val:.1f} / ATL {atl_val:.1f}."
+                           if ctl_val is not None and atl_val is not None else ""))
+        if val is not None:
+            st.caption("Frisch" if val >= 0 else "Ermüdet")
 else:
     st.info("Für diesen Tag liegt noch keine daily_summary vor (füllt sich ab dem nächsten Sync).")
 

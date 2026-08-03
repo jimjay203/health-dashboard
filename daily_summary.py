@@ -22,6 +22,9 @@ OVERREACH_MIN_SLEEP_HOURS = 6.0
 NOTABLE_DEVIATION_MULTIPLIER = 1.5   # ab dem Wievielfachen der Overreach-Schwelle notable_events_text greift
 NOTABLE_ACWR_THRESHOLD = 1.5
 
+CTL_TIME_CONSTANT_DAYS = 42          # Chronic Training Load (Fitness) - EWMA-Zeitkonstante
+ATL_TIME_CONSTANT_DAYS = 7           # Acute Training Load (Ermüdung) - EWMA-Zeitkonstante
+
 
 def _daterange(end_date_str, num_days, include_end=True):
     """(start, end) als ISO-Strings für ein num_days-Fenster, endend bei end_date_str."""
@@ -84,6 +87,26 @@ def _training_monotony_and_strain(cursor, target_date):
     monotony = (mean(daily_loads) / spread) if spread > 0 else None
     strain = (load_7d * monotony) if monotony is not None else None
     return load_7d, monotony, strain
+
+
+def _daily_training_load(cursor, target_date):
+    """Tages-Summe activity_training_load für genau target_date (0.0 an trainingsfreien Tagen)."""
+    row = cursor.execute(
+        "SELECT SUM(activity_training_load) AS total FROM garmin_activities "
+        "WHERE date(start_time_local) = ? AND activity_training_load IS NOT NULL",
+        (target_date,)
+    ).fetchone()
+    return row["total"] if row and row["total"] is not None else 0.0
+
+
+def _previous_ctl_atl(cursor, target_date):
+    """CTL/ATL des Vortags aus daily_summary - (0.0, 0.0) als Kaltstart, falls noch keine
+    Vortages-Zeile existiert (dann laufen sich CTL/ATL über die nächsten Wochen erst ein)."""
+    prev_date = (date.fromisoformat(target_date) - timedelta(days=1)).isoformat()
+    row = cursor.execute("SELECT ctl, atl FROM daily_summary WHERE date = ?", (prev_date,)).fetchone()
+    if not row or row["ctl"] is None or row["atl"] is None:
+        return 0.0, 0.0
+    return row["ctl"], row["atl"]
 
 
 def _sleep_debt(cursor, target_date):
@@ -196,6 +219,12 @@ def compute_daily_summary(target_date):
         if training_load_28d else None
     )
 
+    daily_load = _daily_training_load(cursor, target_date)
+    prev_ctl, prev_atl = _previous_ctl_atl(cursor, target_date)
+    ctl = prev_ctl + (daily_load - prev_ctl) / CTL_TIME_CONSTANT_DAYS
+    atl = prev_atl + (daily_load - prev_atl) / ATL_TIME_CONSTANT_DAYS
+    tsb = ctl - atl
+
     sleep_debt = _sleep_debt(cursor, target_date)
     overreach = _overreach_flag(rhr_vs_7d, hrv_vs_7d, sleep_vs_7d, sleep_hours)
     days_until_race = _days_until_next_race(cursor, target_date)
@@ -216,6 +245,9 @@ def compute_daily_summary(target_date):
         "acute_chronic_ratio": acute_chronic_ratio,
         "training_monotony": training_monotony,
         "training_strain": training_strain,
+        "ctl": ctl,
+        "atl": atl,
+        "tsb": tsb,
         "sleep_debt_cumulative": sleep_debt,
         "overreach_flag": overreach,
         "days_until_next_race": days_until_race,
