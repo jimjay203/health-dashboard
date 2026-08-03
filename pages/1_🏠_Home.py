@@ -69,6 +69,12 @@ daily_summary_row = cursor.fetchone()
 cursor.execute("SELECT * FROM garmin_sleep_phases WHERE date = ?", (date_str,))
 sleep_phases = cursor.fetchone()
 
+# ISO-Kalenderwoche des ausgewählten Tages, um die passende weekly_summary-Zeile zu finden
+_iso_year, _iso_week, _ = selected_date.isocalendar()
+week_id = f"{_iso_year}-W{_iso_week:02d}"
+cursor.execute("SELECT * FROM weekly_summary WHERE week_id = ?", (week_id,))
+weekly_summary_row = cursor.fetchone()
+
 cursor.execute("SELECT raw_json FROM garmin_daily WHERE date = ?", (date_str,))
 garmin_raw_row = cursor.fetchone()
 conn.close()
@@ -271,6 +277,33 @@ if daily_summary_row:
                         "sonst 8h) über die letzten 14 Tage.")
 else:
     st.info("Für diesen Tag liegt noch keine daily_summary vor (füllt sich ab dem nächsten Sync).")
+
+st.markdown(f"**📅 Wochenübersicht** ({week_id})")
+if weekly_summary_row:
+    if weekly_summary_row["notable_events_text"]:
+        st.caption(f"ℹ️ {weekly_summary_row['notable_events_text']}")
+
+    ws1, ws2, ws3, ws4 = st.columns(4)
+    ws1.metric("🏃 Laufen", f"{weekly_summary_row['volume_running_km']:.1f} km")
+    ws2.metric("🚴 Radfahren", f"{weekly_summary_row['volume_cycling_km']:.1f} km")
+    ws3.metric("🏊 Schwimmen", f"{weekly_summary_row['volume_swimming_km']:.1f} km")
+    phase = weekly_summary_row["training_phase"]
+    ws4.metric("📊 Trainingsphase", phase if phase else "--")
+
+    z1z2 = weekly_summary_row["zone_distribution_z1_z2_pct"]
+    days_race = weekly_summary_row["days_until_next_race"]
+    limiter = weekly_summary_row["discipline_limiter"]
+    detail_bits = []
+    if z1z2 is not None:
+        detail_bits.append(f"Zone 1-2: {z1z2:.0f}%")
+    if days_race is not None:
+        detail_bits.append(f"Nächstes Rennen in {days_race} Tagen")
+    if limiter:
+        detail_bits.append(f"Limiter: {limiter}")
+    if detail_bits:
+        st.caption(" · ".join(detail_bits))
+else:
+    st.info("Für diese Woche liegt noch keine weekly_summary vor (füllt sich ab dem nächsten Sync).")
 
 
 def _fmt_hm(seconds):

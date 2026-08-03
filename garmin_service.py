@@ -7,6 +7,7 @@ from garmin_auth import get_garmin_client
 from db import save_garmin_data, upsert_daily_metric, replace_timeseries, upsert_weigh_in, upsert_by_key, get_connection
 from training_zones import recompute_zones
 from daily_summary import compute_daily_summary
+from weekly_summary import compute_weekly_summary
 
 
 def _pause():
@@ -128,9 +129,11 @@ def fetch_and_store_garmin_data(target_date=None, client=None):
     if target_date == date.today().isoformat():
         recompute_zones(target_date)
 
-    # daily_summary läuft bewusst unconditional (auch für Backfill-Tage), anders als recompute_zones
-    # oben - Schicht 1 der KI-Chat-Vorbereitung soll für jeden importierten Tag vorliegen.
+    # daily_summary/weekly_summary laufen bewusst unconditional (auch für Backfill-Tage), anders
+    # als recompute_zones oben - Schicht 1+2 der KI-Chat-Vorbereitung sollen für jeden importierten
+    # Tag bzw. jede betroffene Woche vorliegen.
     compute_daily_summary(target_date)
+    compute_weekly_summary(target_date)
 
     return db_payload
 

@@ -608,6 +608,39 @@ def init_db():
     )
     """)
 
+    # Schicht 2 der KI-Chat-Vorbereitung: regelbasierte Wochen-Kennzahlen (siehe weekly_summary.py),
+    # aufbauend auf daily_summary/activity_analytics/training_zones_*. PK ist week_id (z.B.
+    # "2026-W31") statt eines Datums, damit upsert_by_key() direkt wiederverwendet werden kann.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS weekly_summary (
+        week_id TEXT PRIMARY KEY,
+        year INTEGER,
+        iso_week INTEGER,
+        week_start_date TEXT,
+        week_end_date TEXT,
+        volume_running_km REAL,
+        volume_cycling_km REAL,
+        volume_swimming_km REAL,
+        volume_total_minutes REAL,
+        zone_distribution_z1_z2_pct REAL,
+        zone_distribution_z3_plus_pct REAL,
+        cross_training_run_pct REAL,
+        cross_training_bike_pct REAL,
+        cross_training_swim_pct REAL,
+        discipline_limiter TEXT,
+        longest_session_km REAL,
+        longest_session_vs_4wk_trend_pct REAL,
+        training_phase TEXT,
+        days_until_next_race INTEGER,
+        avg_readiness_7d REAL,
+        avg_hrv_7d REAL,
+        yoy_same_week_volume_km REAL,
+        data_quality_flag TEXT,
+        notable_events_text TEXT,
+        computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
     conn.commit()
     conn.close()
 
