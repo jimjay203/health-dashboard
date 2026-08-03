@@ -1,8 +1,22 @@
 import json
 import streamlit as st
-from datetime import date
+import pandas as pd
+import plotly.express as px
+from datetime import date, timedelta
 from db import get_connection, save_journal_entry, init_db
 from ai_coach import generate_daily_coaching
+
+# Schlafphasen-Chart (Test): Farben aus der validierten Default-Palette, aber diese konkrete
+# 4er-Kombination (blau/aqua/violett/rot) konnte in dieser Umgebung nicht automatisiert gegen
+# den Kontrast-/CVD-Validator geprüft werden (kein Node.js verfügbar) - bei Bedarf später nachholen.
+SLEEP_STAGE_LABELS = {0: "Tiefschlaf", 1: "Leichtschlaf", 2: "REM", 3: "Wach"}
+SLEEP_STAGE_ORDER = ["Tiefschlaf", "Leichtschlaf", "REM", "Wach"]
+SLEEP_STAGE_COLORS = {
+    "Tiefschlaf": "#2a78d6",
+    "Leichtschlaf": "#1baf7a",
+    "REM": "#4a3aa7",
+    "Wach": "#d03b3b",
+}
 
 # Garmin liefert die Faktor-Bewertungen als Enum-Codes (z.B. "POOR", "GOOD") statt als
 # fertigen Text - hier übersetzt, statt den kryptischen "feedbackLong"-Kombicode
@@ -48,6 +62,15 @@ journal = cursor.fetchone()
 
 cursor.execute("SELECT * FROM garmin_training_readiness WHERE date = ?", (date_str,))
 readiness = cursor.fetchone()
+
+cursor.execute("SELECT * FROM daily_summary WHERE date = ?", (date_str,))
+daily_summary_row = cursor.fetchone()
+
+cursor.execute("SELECT * FROM garmin_sleep_phases WHERE date = ?", (date_str,))
+sleep_phases = cursor.fetchone()
+
+cursor.execute("SELECT raw_json FROM garmin_daily WHERE date = ?", (date_str,))
+garmin_raw_row = cursor.fetchone()
 conn.close()
 
 st.divider()
@@ -209,3 +232,116 @@ if readiness:
             st.write(f"- **{label}:** {pct_txt} · {fb_txt}")
 else:
     st.info("Keine Garmin-Trainingsbereitschaftsdaten für diesen Tag vorhanden. Synchronisiere zuerst über die Settings-Seite.")
+
+st.divider()
+
+# --- BEREICH 5: NEUE AUSWERTUNGEN (Schicht 1 - Test) ---
+st.subheader("🆕 Neue Auswertungen")
+st.caption(
+    "Testbereich für die neu automatisch bei jedem Sync berechneten Kennzahlen - Vorstufe für "
+    "einen künftigen KI-Chat, der auf diesen vorverdichteten Werten aufbaut statt bei jeder Frage "
+    "die Rohdaten neu auszuwerten. Rein regelbasiert berechnet (Schwellenwerte/Statistik), kein LLM."
+)
+
+if daily_summary_row:
+    if daily_summary_row["notable_events_text"]:
+        if daily_summary_row["overreach_flag"]:
+            st.error(f"⚠️ {daily_summary_row['notable_events_text']}")
+        else:
+            st.info(f"ℹ️ {daily_summary_row['notable_events_text']}")
+
+    ns1, ns2, ns3, ns4 = st.columns(4)
+    with ns1:
+        val = daily_summary_row["hrv_vs_7d_avg_pct"]
+        st.metric("HRV vs. Ø 7 Tage", f"{val:+.0f}%" if val is not None else "--",
+                   help="Vergleich der heutigen HRV gegen den Schnitt der vorangehenden 7 Tage.")
+    with ns2:
+        val = daily_summary_row["sleep_vs_7d_avg_pct"]
+        st.metric("Schlaf vs. Ø 7 Tage", f"{val:+.0f}%" if val is not None else "--",
+                   help="Vergleich der Schlafdauer gegen den Schnitt der vorangehenden 7 Tage.")
+    with ns3:
+        val = daily_summary_row["acute_chronic_ratio"]
+        st.metric("Belastung (ACWR)", f"{val:.2f}" if val is not None else "--",
+                   help="Akute (7 Tage) zu chronischer (28 Tage) Trainingsbelastung. ~1.0 = ausgeglichen, "
+                        "deutlich über 1.5 = erhöhtes Verletzungs-/Übertrainingsrisiko.")
+    with ns4:
+        val = daily_summary_row["sleep_debt_cumulative"]
+        st.metric("Schlafschuld (14 T.)", f"{val:+.1f} h" if val is not None else "--",
+                   help="Rollierende Abweichung von deinem individuellen Schlafbedarf (Garmins sleepNeed, "
+                        "sonst 8h) über die letzten 14 Tage.")
+else:
+    st.info("Für diesen Tag liegt noch keine daily_summary vor (füllt sich ab dem nächsten Sync).")
+
+
+def _fmt_hm(seconds):
+    if seconds is None:
+        return "–"
+    h, m = divmod(int(seconds) // 60, 60)
+    return f"{h}h {m:02d}m"
+
+
+st.markdown("**😴 Schlafphasen**")
+if sleep_phases:
+    sp1, sp2, sp3, sp4 = st.columns(4)
+    sp1.metric("Tiefschlaf", _fmt_hm(sleep_phases["deep_sleep_seconds"]),
+               f"{sleep_phases['deep_pct']}% · {translate_feedback(sleep_phases['deep_qualifier'])}"
+               if sleep_phases["deep_pct"] is not None else None)
+    sp2.metric("Leichtschlaf", _fmt_hm(sleep_phases["light_sleep_seconds"]),
+               f"{sleep_phases['light_pct']}% · {translate_feedback(sleep_phases['light_qualifier'])}"
+               if sleep_phases["light_pct"] is not None else None)
+    sp3.metric("REM", _fmt_hm(sleep_phases["rem_sleep_seconds"]),
+               f"{sleep_phases['rem_pct']}% · {translate_feedback(sleep_phases['rem_qualifier'])}"
+               if sleep_phases["rem_pct"] is not None else None)
+    sp4.metric("Wachphasen", f"{sleep_phases['awake_count']}x" if sleep_phases["awake_count"] is not None else "--",
+               _fmt_hm(sleep_phases["awake_sleep_seconds"]))
+
+    # Testweise: Minuten-genauer Phasenverlauf aus Garmins Rohdaten (sleepLevels), die schon im
+    # bestehenden Sync in garmin_daily.raw_json mitgespeichert werden - noch keine eigene Tabelle,
+    # nur zur Ansicht. Vgl. Garmin Connect App ("Sleep Score"-Kachel).
+    sleep_levels, gmt_to_local_offset = None, timedelta(0)
+    if garmin_raw_row and garmin_raw_row["raw_json"]:
+        try:
+            blob = json.loads(garmin_raw_row["raw_json"])
+            sleep_blob = blob.get("sleep") or {}
+            sleep_levels = sleep_blob.get("sleepLevels")
+            dto = sleep_blob.get("dailySleepDTO") or {}
+            # sleepStartTimestampGMT/...Local sind Epoch-Millisekunden (Integer), keine ISO-Strings -
+            # direkt als Millisekunden-Differenz rechnen, nicht über pd.to_datetime() (das einen
+            # rohen Integer sonst fälschlich als Nanosekunden interpretiert).
+            gmt_start = dto.get("sleepStartTimestampGMT")
+            local_start = dto.get("sleepStartTimestampLocal")
+            if gmt_start and local_start:
+                gmt_to_local_offset = timedelta(milliseconds=local_start - gmt_start)
+        except (json.JSONDecodeError, AttributeError, TypeError):
+            sleep_levels = None
+
+    if sleep_levels:
+        rows = [
+            {"Start": lvl["startGMT"], "Ende": lvl["endGMT"], "Phase": SLEEP_STAGE_LABELS[lvl["activityLevel"]]}
+            for lvl in sleep_levels if lvl.get("activityLevel") in SLEEP_STAGE_LABELS
+        ]
+        df_sleep = pd.DataFrame(rows)
+        df_sleep["Start"] = pd.to_datetime(df_sleep["Start"]) + gmt_to_local_offset
+        df_sleep["Ende"] = pd.to_datetime(df_sleep["Ende"]) + gmt_to_local_offset
+        df_sleep["Nacht"] = "Schlaf"
+
+        fig_sleep = px.timeline(
+            df_sleep, x_start="Start", x_end="Ende", y="Nacht", color="Phase",
+            color_discrete_map=SLEEP_STAGE_COLORS,
+            category_orders={"Phase": SLEEP_STAGE_ORDER},
+        )
+        fig_sleep.update_yaxes(visible=False)
+        fig_sleep.update_layout(
+            xaxis_title="Uhrzeit (lokal)", legend_title="Phase", height=200,
+            margin=dict(l=10, r=10, t=10, b=10)
+        )
+        st.plotly_chart(fig_sleep, use_container_width=True)
+        st.caption(
+            "Test-Chart aus Garmins Minuten-Zeitreihe (sleepLevels), die bereits im Sync mitkommt - "
+            "noch keine eigene Tabelle, nur zur Ansicht. Farben konnten in dieser Umgebung nicht "
+            "automatisiert validiert werden (kein Node.js verfügbar)."
+        )
+    else:
+        st.caption("Keine Minuten-genaue Schlafphasen-Zeitreihe im Rohdaten-Archiv für diesen Tag gefunden.")
+else:
+    st.info("Keine Schlafphasen-Daten für diesen Tag vorhanden.")

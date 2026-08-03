@@ -144,6 +144,9 @@ def init_db():
             functional_threshold_power INTEGER,
             power_to_weight REAL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            -- Achtung: functional_threshold_power/power_to_weight sind LAUF-Leistungswerte
+            -- (Garmins Rohantwort taggt das power-Objekt mit "sport": "RUNNING"), KEIN Rad-FTP.
+            -- Rad-FTP kommt ausschließlich aus garmin_cycling_ftp (siehe training_zones.py).
         """,
         "garmin_running_tolerance": """
             date TEXT PRIMARY KEY,
@@ -244,6 +247,48 @@ def init_db():
             functional_threshold_power INTEGER,
             measured_date TEXT,
             is_stale INTEGER,
+            power_to_weight REAL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        """,
+        # Schlafphasen aus dailySleepDTO (bereits Teil der bestehenden get_sleep_data()-Antwort,
+        # kein neuer API-Call) - bisher nur ungenutzt im raw_json-Blob von garmin_daily.
+        "garmin_sleep_phases": """
+            date TEXT PRIMARY KEY,
+            deep_sleep_seconds INTEGER,
+            light_sleep_seconds INTEGER,
+            rem_sleep_seconds INTEGER,
+            awake_sleep_seconds INTEGER,
+            deep_pct INTEGER,
+            light_pct INTEGER,
+            rem_pct INTEGER,
+            deep_qualifier TEXT,
+            light_qualifier TEXT,
+            rem_qualifier TEXT,
+            awake_count INTEGER,
+            avg_sleep_stress REAL,
+            avg_sleep_hr REAL,
+            sleep_need_seconds INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        """,
+        # Schicht 1 der KI-Chat-Vorbereitung: regelbasiert vorverdichtete Tageskennzahlen
+        # (siehe daily_summary.py), unconditional bei jedem Sync berechnet (auch Backfill-Tage).
+        "daily_summary": """
+            date TEXT PRIMARY KEY,
+            hrv_vs_7d_avg_pct REAL,
+            hrv_vs_28d_avg_pct REAL,
+            sleep_vs_7d_avg_pct REAL,
+            resting_hr_vs_7d_avg_pct REAL,
+            training_load_7d REAL,
+            training_load_28d REAL,
+            acute_chronic_ratio REAL,
+            training_monotony REAL,
+            training_strain REAL,
+            sleep_debt_cumulative REAL,
+            overreach_flag INTEGER,
+            days_until_next_race INTEGER,
+            weight_vs_avg_pct REAL,
+            data_quality_flag TEXT,
+            notable_events_text TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         """,
     }
@@ -283,6 +328,10 @@ def init_db():
     existing_columns = {row[1] for row in cursor.execute("PRAGMA table_info(garmin_training_status)")}
     if "most_recent_vo2max_cycling" not in existing_columns:
         cursor.execute("ALTER TABLE garmin_training_status ADD COLUMN most_recent_vo2max_cycling REAL")
+
+    existing_columns = {row[1] for row in cursor.execute("PRAGMA table_info(garmin_cycling_ftp)")}
+    if "power_to_weight" not in existing_columns:
+        cursor.execute("ALTER TABLE garmin_cycling_ftp ADD COLUMN power_to_weight REAL")
 
     # Zeitreihen-Tabellen: mehrere Zeilen pro Datum, komplett ersetzt über replace_timeseries()
     timeseries_tables = {
@@ -365,6 +414,33 @@ def init_db():
             shareable_event_uuid TEXT,
             workout_id INTEGER,
             training_plan_id INTEGER
+        """,
+        # Trainingszonen nach Joe Friel, berechnet aus garmin_lactate_threshold/garmin_cycling_ftp
+        # (siehe training_zones.py). Ein Zonen-"Snapshot" pro Berechnungsdatum, mehrere Zeilen
+        # (eine je Zone) - deshalb dasselbe Delete+Insert-Zeitreihen-Muster wie oben, nicht
+        # upsert_daily_metric (das setzt eine Zeile pro Datum voraus).
+        "training_zones_running": """
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL,
+            zone TEXT,
+            hr_min INTEGER,
+            hr_max INTEGER,
+            pace_min_sec_per_km REAL,
+            pace_max_sec_per_km REAL
+        """,
+        "training_zones_cycling_hr": """
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL,
+            zone TEXT,
+            hr_min INTEGER,
+            hr_max INTEGER
+        """,
+        "training_zones_cycling_power": """
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL,
+            zone TEXT,
+            power_min_watts INTEGER,
+            power_max_watts INTEGER
         """,
     }
     for table_name, columns_sql in timeseries_tables.items():
@@ -474,11 +550,16 @@ def init_db():
         device_id INTEGER,
         is_pr INTEGER,
         has_details_synced INTEGER DEFAULT 0,
+        activity_training_load REAL,
         raw_json TEXT,
         synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_garmin_activities_start ON garmin_activities(start_time_local)")
+
+    existing_columns = {row[1] for row in cursor.execute("PRAGMA table_info(garmin_activities)")}
+    if "activity_training_load" not in existing_columns:
+        cursor.execute("ALTER TABLE garmin_activities ADD COLUMN activity_training_load REAL")
 
     # Rohe Sekunden-/GPS-Zeitreihe pro Aktivität (aus get_activity_details) - nur für Aktivitäten,
     # für die der Nutzer das explizit über die Settings-Seite angestoßen hat (kann pro Aktivität
@@ -506,6 +587,26 @@ def init_db():
     )
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_garmin_activity_details_activity_id ON garmin_activity_details(activity_id)")
+
+    # Schicht 1 der KI-Chat-Vorbereitung: regelbasierte Pro-Aktivität-Kennzahlen (siehe
+    # activity_analytics.py), berechnet direkt nach dem Laden der Detail-Zeitreihe einer Aktivität.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS activity_analytics (
+        activity_id INTEGER PRIMARY KEY REFERENCES garmin_activities(activity_id),
+        date TEXT,
+        decoupling_pct REAL,
+        negative_split_bool INTEGER,
+        variability_index REAL,
+        hr_drift_pct REAL,
+        avg_temperature REAL,
+        heat_effect_flag INTEGER,
+        gap_avg_pace_sec_per_km REAL,
+        linked_brick_activity_id INTEGER,
+        bike_to_run_pace_drop_pct REAL,
+        outlier_flag INTEGER,
+        computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
 
     conn.commit()
     conn.close()

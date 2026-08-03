@@ -9,6 +9,7 @@ import time
 import random
 from garminconnect import GarminConnectTooManyRequestsError
 from db import get_connection, upsert_by_key
+from activity_analytics import compute_activity_analytics
 
 # Cadence heißt je nach Sportart unterschiedlich - erster Treffer gewinnt.
 CADENCE_FIELDS = {
@@ -87,6 +88,7 @@ def _extract_summary(activity):
         "location_name": activity.get("locationName"),
         "device_id": activity.get("deviceId"),
         "is_pr": int(bool(activity.get("pr"))),
+        "activity_training_load": activity.get("activityTrainingLoad"),
         "raw_json": json.dumps(activity),
     }
 
@@ -188,6 +190,10 @@ def sync_activity_details(client, max_count=10, on_progress=None):
         )
         conn.commit()
         conn.close()
+
+        # Schicht 1 der KI-Chat-Vorbereitung: erst jetzt sinnvoll möglich, da die meisten Felder
+        # (Decoupling, HF-Drift, GAP, Temperatur) die gerade geladene Sekunden-Zeitreihe brauchen.
+        compute_activity_analytics(activity_id)
 
         synced += 1
         if on_progress:

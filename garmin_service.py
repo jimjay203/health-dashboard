@@ -4,7 +4,9 @@ import random
 from datetime import date, timedelta
 from garminconnect import GarminConnectTooManyRequestsError
 from garmin_auth import get_garmin_client
-from db import save_garmin_data, upsert_daily_metric, replace_timeseries, upsert_weigh_in, upsert_by_key
+from db import save_garmin_data, upsert_daily_metric, replace_timeseries, upsert_weigh_in, upsert_by_key, get_connection
+from training_zones import recompute_zones
+from daily_summary import compute_daily_summary
 
 
 def _pause():
@@ -70,6 +72,32 @@ def fetch_and_store_garmin_data(target_date=None, client=None):
         sleep_seconds = dto.get("sleepTimeSeconds", 0)
         sleep_hours = round(sleep_seconds / 3600.0, 2) if sleep_seconds else None
 
+        # Schlafphasen (REM/Tief/Leicht/Wach) - kommen mit derselben get_sleep_data()-Antwort mit,
+        # bisher nur ungenutzt hier verfügbar (Schicht 1 der KI-Chat-Vorbereitung, siehe daily_summary.py).
+        sleep_scores = dto.get("sleepScores") or {}
+        deep_pct_obj = sleep_scores.get("deepPercentage") or {}
+        light_pct_obj = sleep_scores.get("lightPercentage") or {}
+        rem_pct_obj = sleep_scores.get("remPercentage") or {}
+        sleep_need = dto.get("sleepNeed") or {}
+        sleep_need_minutes = sleep_need.get("actual")
+        upsert_daily_metric("garmin_sleep_phases", {
+            "date": target_date,
+            "deep_sleep_seconds": dto.get("deepSleepSeconds"),
+            "light_sleep_seconds": dto.get("lightSleepSeconds"),
+            "rem_sleep_seconds": dto.get("remSleepSeconds"),
+            "awake_sleep_seconds": dto.get("awakeSleepSeconds"),
+            "deep_pct": deep_pct_obj.get("value"),
+            "light_pct": light_pct_obj.get("value"),
+            "rem_pct": rem_pct_obj.get("value"),
+            "deep_qualifier": deep_pct_obj.get("qualifierKey"),
+            "light_qualifier": light_pct_obj.get("qualifierKey"),
+            "rem_qualifier": rem_pct_obj.get("qualifierKey"),
+            "awake_count": dto.get("awakeCount"),
+            "avg_sleep_stress": dto.get("avgSleepStress"),
+            "avg_sleep_hr": dto.get("avgHeartRate"),
+            "sleep_need_seconds": sleep_need_minutes * 60 if sleep_need_minutes is not None else None,
+        })
+
     avg_hrv = None
     if hrv_data and "hrvSummary" in hrv_data:
         avg_hrv = hrv_data["hrvSummary"].get("weeklyAvg") or hrv_data["hrvSummary"].get("lastNightAvg")
@@ -93,6 +121,16 @@ def fetch_and_store_garmin_data(target_date=None, client=None):
     _fetch_trends_and_wellness(client, target_date)
     _fetch_body_composition(client, target_date)
     _fetch_goals_and_performance(client, target_date)
+
+    # Trainingszonen hängen an garmin_lactate_threshold/garmin_cycling_ftp, die beide nur für
+    # "heute" befüllt werden (Account-weiter aktueller Stand) - daher hier genauso gated, statt
+    # bei jedem Backfill-Tag denselben Snapshot redundant neu zu berechnen.
+    if target_date == date.today().isoformat():
+        recompute_zones(target_date)
+
+    # daily_summary läuft bewusst unconditional (auch für Backfill-Tage), anders als recompute_zones
+    # oben - Schicht 1 der KI-Chat-Vorbereitung soll für jeden importierten Tag vorliegen.
+    compute_daily_summary(target_date)
 
     return db_payload
 
@@ -189,9 +227,13 @@ def _fetch_advanced_health(client, target_date):
         if lactate:
             speed_hr = lactate.get("speed_and_heart_rate", {}) or {}
             power = lactate.get("power", {}) or {}
+            # Garmin liefert "speed" um Faktor 10 zu klein (verifiziert: Rohwert 0.369 ergäbe eine
+            # absurde Pace von ~45 min/km, *10 -> 3.69 m/s -> 4:31 min/km, plausibel für Schwellenpace).
+            raw_speed = speed_hr.get("speed")
+            corrected_speed = raw_speed * 10 if raw_speed is not None else None
             upsert_daily_metric("garmin_lactate_threshold", {
                 "date": target_date,
-                "speed": speed_hr.get("speed"),
+                "speed": corrected_speed,
                 "heart_rate": speed_hr.get("heartRate"),
                 "heart_rate_cycling": speed_hr.get("heartRateCycling"),
                 "functional_threshold_power": power.get("functionalThresholdPower"),
@@ -501,11 +543,27 @@ def _fetch_goals_and_performance(client, target_date):
 
     ftp = _safe_call(client, "get_cycling_ftp", lambda c: c.get_cycling_ftp())
     if ftp:
+        # Garmins get_cycling_ftp() liefert kein W/kg mit (anders als der Lauf-Leistungswert in
+        # garmin_lactate_threshold, der ein eigenes powerToWeight-Feld hat) - hier selbst aus dem
+        # aktuellsten bekannten Körpergewicht berechnen, statt es dem Nutzer vorzuenthalten.
+        ftp_watts = ftp.get("functionalThresholdPower")
+        power_to_weight = None
+        if ftp_watts is not None:
+            conn = get_connection()
+            weight_row = conn.execute(
+                "SELECT weight FROM garmin_weigh_ins WHERE weight IS NOT NULL ORDER BY date DESC LIMIT 1"
+            ).fetchone()
+            conn.close()
+            if weight_row and weight_row["weight"]:
+                weight_kg = weight_row["weight"] / 1000.0
+                power_to_weight = ftp_watts / weight_kg
+
         upsert_daily_metric("garmin_cycling_ftp", {
             "date": target_date,
-            "functional_threshold_power": ftp.get("functionalThresholdPower"),
+            "functional_threshold_power": ftp_watts,
             "measured_date": ftp.get("calendarDate"),
             "is_stale": int(ftp.get("isStale")) if ftp.get("isStale") is not None else None,
+            "power_to_weight": power_to_weight,
         })
 
     personal_records = _safe_call(client, "get_personal_record", lambda c: c.get_personal_record())

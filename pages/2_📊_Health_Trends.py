@@ -22,7 +22,11 @@ df_weigh_ins = pd.read_sql_query("SELECT date, weight FROM garmin_weigh_ins ORDE
 df_events = pd.read_sql_query("SELECT event_date, title, is_race, distance_meters, activity_type_id FROM garmin_scheduled_events ORDER BY event_date ASC", conn)
 df_endurance = pd.read_sql_query("SELECT * FROM garmin_endurance_score ORDER BY date DESC LIMIT 1", conn)
 df_hill = pd.read_sql_query("SELECT * FROM garmin_hill_score ORDER BY date DESC LIMIT 1", conn)
-df_ftp = pd.read_sql_query("SELECT date, functional_threshold_power, measured_date FROM garmin_cycling_ftp ORDER BY date DESC LIMIT 1", conn)
+df_ftp = pd.read_sql_query("SELECT date, functional_threshold_power, measured_date, power_to_weight FROM garmin_cycling_ftp ORDER BY date DESC LIMIT 1", conn)
+df_lactate = pd.read_sql_query(
+    "SELECT date, speed, heart_rate, heart_rate_cycling, power_to_weight "
+    "FROM garmin_lactate_threshold ORDER BY date DESC LIMIT 1", conn
+)
 conn.close()
 
 today = date.today()
@@ -40,6 +44,13 @@ ENDURANCE_TIERS = [
     ("Trained", "classification_trained"),
     ("Intermediate", "classification_intermediate"),
 ]
+
+
+def format_pace(sec_per_km):
+    if pd.isna(sec_per_km):
+        return "–"
+    m, s = divmod(int(round(sec_per_km)), 60)
+    return f"{m}:{s:02d}/km"
 
 
 def classify_endurance_score(row):
@@ -180,28 +191,61 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# --- Aktuelle Leistungswerte (noch wenig Historie, daher als Kennzahl statt Trendlinie) ---
+# --- Aktuelle Leistungswerte, nach Sportart gruppiert (noch wenig Historie, daher als
+# Kennzahl statt Trendlinie) ---
 st.divider()
-perf_cols = st.columns(3)
-with perf_cols[0]:
+lactate_row = df_lactate.iloc[0] if not df_lactate.empty else None
+ftp_row = df_ftp.iloc[0] if not df_ftp.empty else None
+
+st.markdown("**🏃 Laufen**")
+run_cols = st.columns(5)
+with run_cols[0]:
     if not df_endurance.empty and pd.notna(df_endurance.iloc[0]["overall_score"]):
         row = df_endurance.iloc[0]
         tier, next_tier, points_to_next = classify_endurance_score(row)
         delta = f"{tier}" + (f" · noch {int(points_to_next)} bis {next_tier}" if points_to_next is not None and points_to_next > 0 else "")
-        st.metric("🏃 Endurance Score", int(row["overall_score"]), delta, help=f"Stand: {row['date']} · Skala {row['gauge_lower_limit']}-{row['gauge_upper_limit']} (Garmins eigene Einordnung)")
+        st.metric("Endurance Score", int(row["overall_score"]), delta, help=f"Stand: {row['date']} · Skala {row['gauge_lower_limit']}-{row['gauge_upper_limit']} (Garmins eigene Einordnung)")
     else:
-        st.metric("🏃 Endurance Score", "--")
-with perf_cols[1]:
+        st.metric("Endurance Score", "--")
+with run_cols[1]:
     if not df_hill.empty and pd.notna(df_hill.iloc[0]["overall_score"]):
         row = df_hill.iloc[0]
-        st.metric("⛰️ Hill Score", int(row["overall_score"]), help=f"Stand: {row['date']} · Garmin liefert für den Hill Score über die API keine Klassifizierungs-Schwellenwerte, daher hier ohne Einordnung (roher Score + Klassifizierungs-ID {int(row['classification_id']) if pd.notna(row['classification_id']) else '?'})")
+        st.metric("Hill Score", int(row["overall_score"]), help=f"Stand: {row['date']} · Garmin liefert für den Hill Score über die API keine Klassifizierungs-Schwellenwerte, daher hier ohne Einordnung (roher Score + Klassifizierungs-ID {int(row['classification_id']) if pd.notna(row['classification_id']) else '?'})")
     else:
-        st.metric("⛰️ Hill Score", "--")
-with perf_cols[2]:
-    if not df_ftp.empty and pd.notna(df_ftp.iloc[0]["functional_threshold_power"]):
-        st.metric("🚴 Cycling FTP", f"{int(df_ftp.iloc[0]['functional_threshold_power'])} W", help=f"Gemessen: {df_ftp.iloc[0]['measured_date']}")
+        st.metric("Hill Score", "--")
+with run_cols[2]:
+    if lactate_row is not None and pd.notna(lactate_row["heart_rate"]):
+        st.metric("LTHR", f"{int(lactate_row['heart_rate'])} bpm", help=f"Stand: {lactate_row['date']}")
     else:
-        st.metric("🚴 Cycling FTP", "--")
+        st.metric("LTHR", "--")
+with run_cols[3]:
+    if lactate_row is not None and pd.notna(lactate_row["speed"]) and lactate_row["speed"]:
+        pace = 1000.0 / lactate_row["speed"]
+        st.metric("Schwellenpace", format_pace(pace), help=f"Stand: {lactate_row['date']}")
+    else:
+        st.metric("Schwellenpace", "--")
+with run_cols[4]:
+    if lactate_row is not None and pd.notna(lactate_row["power_to_weight"]):
+        st.metric("Leistung/kg", f"{lactate_row['power_to_weight']:.2f} W/kg", help=f"Stand: {lactate_row['date']} · Lauf-Leistungsschwelle (Garmin taggt sie selbst mit \"sport\":\"RUNNING\"), keine Rad-FTP")
+    else:
+        st.metric("Leistung/kg", "--")
+
+st.markdown("**🚴 Radfahren**")
+bike_cols = st.columns(2)
+with bike_cols[0]:
+    if lactate_row is not None and pd.notna(lactate_row["heart_rate_cycling"]):
+        st.metric("Bike-LTHR", f"{int(lactate_row['heart_rate_cycling'])} bpm", help=f"Stand: {lactate_row['date']}")
+    else:
+        st.metric("Bike-LTHR", "--")
+with bike_cols[1]:
+    if ftp_row is not None and pd.notna(ftp_row["functional_threshold_power"]):
+        watts = int(ftp_row["functional_threshold_power"])
+        if pd.notna(ftp_row["power_to_weight"]):
+            st.metric("FTP", f"{ftp_row['power_to_weight']:.2f} W/kg", help=f"{watts} W · Gemessen: {ftp_row['measured_date']} · W/kg selbst aus FTP und aktuellstem Gewicht berechnet (Garmin liefert kein W/kg für Rad-FTP)")
+        else:
+            st.metric("FTP", f"{watts} W", help=f"Gemessen: {ftp_row['measured_date']} · W/kg konnte nicht berechnet werden (kein Körpergewicht vorhanden)")
+    else:
+        st.metric("FTP", "--")
 
 st.divider()
 
