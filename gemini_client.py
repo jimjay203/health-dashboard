@@ -1,6 +1,6 @@
 """
-Gemeinsame Gemini-Konfiguration für ai_coach.py und insight_memory.py - eine Quelle für
-API-Key/Modell/Client-Erzeugung statt mehrerer paralleler Konfigurationen.
+Gemeinsame Gemini-Konfiguration - eine Quelle für API-Key/Modell/Client-Erzeugung statt
+mehrerer paralleler Konfigurationen. Aktuell genutzt von insight_memory.py.
 """
 import os
 from google import genai

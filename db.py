@@ -45,23 +45,10 @@ def init_db():
     )
     """)
 
-    # 3. AI Coach Cache Table (Speichert generierte Empfehlungen)
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS ai_coach_insights (
-        date TEXT PRIMARY KEY,
-        readiness_score INTEGER,   -- KI-berechneter Score (0-100)
-        status_summary TEXT,       -- Kurzer Status
-        training_focus TEXT,       -- Kurzer Trainingsfokus (z.B. "Aktive Erholung"), auf einen Blick lesbar
-        key_recommendations TEXT,  -- JSON-Liste kurzer, konkreter Handlungsempfehlungen
-        coaching_advice TEXT,      -- Ausführliche Begründung/Empfehlung (Details, nicht auf den ersten Blick)
-        model_used TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
-    existing_columns = {row[1] for row in cursor.execute("PRAGMA table_info(ai_coach_insights)")}
-    for column, coltype in {"training_focus": "TEXT", "key_recommendations": "TEXT"}.items():
-        if column not in existing_columns:
-            cursor.execute(f"ALTER TABLE ai_coach_insights ADD COLUMN {column} {coltype}")
+    # ai_coach_insights (Gemini-Tagesform-Cache) wurde entfernt - Feature komplett gestrichen,
+    # DROP für bereits bestehende Installationen (Daten waren nur ein jederzeit neu generierbarer
+    # Cache, kein Nutzer-Rohdatenverlust).
+    cursor.execute("DROP TABLE IF EXISTS ai_coach_insights")
 
     # --- Erweiterte Metrik-Tabellen (Advanced Health, Trends, Körperkomposition, Hydration) ---
     # Tages-Tabellen: eine Zeile pro Datum, upsert über upsert_daily_metric()
@@ -338,6 +325,19 @@ def init_db():
     daily_summary_columns = {"ctl": "REAL", "atl": "REAL", "tsb": "REAL"}
     existing_columns = {row[1] for row in cursor.execute("PRAGMA table_info(daily_summary)")}
     for column, coltype in daily_summary_columns.items():
+        if column not in existing_columns:
+            cursor.execute(f"ALTER TABLE daily_summary ADD COLUMN {column} {coltype}")
+
+    # Journal-Spiegel-Spalten: werden NICHT vom Garmin-Sync (compute_daily_summary) geschrieben,
+    # sondern eigenständig beim Speichern des Tagesjournals (siehe daily_summary.sync_journal_
+    # columns()) - Reihenfolge-unabhängiges Spalten-Gruppen-Upsert, siehe dortiger Kommentar.
+    daily_summary_journal_columns = {
+        "journal_rpe": "INTEGER",
+        "journal_soreness": "INTEGER",
+        "journal_energy_level": "INTEGER",
+    }
+    existing_columns = {row[1] for row in cursor.execute("PRAGMA table_info(daily_summary)")}
+    for column, coltype in daily_summary_journal_columns.items():
         if column not in existing_columns:
             cursor.execute(f"ALTER TABLE daily_summary ADD COLUMN {column} {coltype}")
 
@@ -658,9 +658,30 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         raw_text TEXT NOT NULL,
-        source TEXT NOT NULL DEFAULT 'user' CHECK(source IN ('user', 'claude_import'))
+        source TEXT NOT NULL DEFAULT 'user' CHECK(source IN ('user', 'claude_import', 'journal'))
     )
     """)
+
+    # SQLite kann CHECK-Constraints nicht per ALTER TABLE ändern - bei bereits bestehenden
+    # Installationen (alter Constraint ohne 'journal') Tabelle neu anlegen und Daten migrieren.
+    existing_sql = cursor.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='insight_memory_raw'"
+    ).fetchone()
+    if existing_sql and "'journal'" not in existing_sql[0]:
+        cursor.execute("ALTER TABLE insight_memory_raw RENAME TO insight_memory_raw_old")
+        cursor.execute("""
+        CREATE TABLE insight_memory_raw (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            raw_text TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'user' CHECK(source IN ('user', 'claude_import', 'journal'))
+        )
+        """)
+        cursor.execute("""
+            INSERT INTO insight_memory_raw (id, created_at, raw_text, source)
+            SELECT id, created_at, raw_text, source FROM insight_memory_raw_old
+        """)
+        cursor.execute("DROP TABLE insight_memory_raw_old")
 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS insight_memory_compressed (
@@ -671,14 +692,10 @@ def init_db():
     )
     """)
 
-    # Trigger-Gate für den täglichen Teil-B-Lauf: verhindert mehrfache Gemini-Calls, falls der
-    # Garmin-Sync mehrmals am selben Tag läuft (siehe garmin_service.py).
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS insight_memory_daily_run (
-        date TEXT PRIMARY KEY,
-        ran_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
+    # Wieder entfernt: insight_memory sollte nie datenabgeleitete Inhalte enthalten (siehe
+    # insight_memory.py-Docstring) - der tägliche Auto-Lauf samt Trigger-Gate-Tabelle
+    # insight_memory_daily_run war ein Fehldesign und wurde ersatzlos gestrichen.
+    cursor.execute("DROP TABLE IF EXISTS insight_memory_daily_run")
 
     conn.commit()
     conn.close()

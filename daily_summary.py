@@ -179,8 +179,11 @@ def _data_quality_flag(garmin_row):
     return None
 
 
-def _notable_events_text(overreach_flag, days_until_race, hrv_pct, sleep_pct, rhr_pct, acute_chronic_ratio):
+def _notable_events_text(overreach_flag, journal_filled, days_until_race, hrv_pct, sleep_pct, rhr_pct, acute_chronic_ratio):
     if overreach_flag:
+        if not journal_filled:
+            return ("Objektive Warnsignale (Ruhepuls/HRV/Schlaf) vorhanden, "
+                    "subjektives Befinden noch nicht erfasst.")
         return "Übertrainingsrisiko: Ruhepuls erhöht, HRV niedrig und Schlaf schlecht zugleich."
     if days_until_race is not None and 0 <= days_until_race <= 7:
         return f"Nur noch {days_until_race} Tage bis zum nächsten Rennen."
@@ -230,7 +233,16 @@ def compute_daily_summary(target_date):
     days_until_race = _days_until_next_race(cursor, target_date)
     weight_pct = _weight_vs_avg_pct(cursor, target_date)
     data_quality = _data_quality_flag(garmin_row)
-    notable_text = _notable_events_text(overreach, days_until_race, hrv_vs_7d, sleep_vs_7d, rhr_vs_7d, acute_chronic_ratio)
+
+    # daily_journal ist die Quelle der Wahrheit dafür, ob für target_date bereits subjektiv
+    # journalisiert wurde - unabhängig davon, ob das Journal vor oder nach diesem Sync gespeichert
+    # wurde (Reihenfolge-unabhängigkeit, siehe sync_journal_columns() unten).
+    journal_filled = cursor.execute(
+        "SELECT 1 FROM daily_journal WHERE date = ?", (target_date,)
+    ).fetchone() is not None
+    notable_text = _notable_events_text(
+        overreach, journal_filled, days_until_race, hrv_vs_7d, sleep_vs_7d, rhr_vs_7d, acute_chronic_ratio
+    )
 
     conn.close()
 
@@ -253,5 +265,41 @@ def compute_daily_summary(target_date):
         "days_until_next_race": days_until_race,
         "weight_vs_avg_pct": weight_pct,
         "data_quality_flag": data_quality,
+        "notable_events_text": notable_text,
+    })
+
+
+def sync_journal_columns(target_date, rpe, soreness, energy):
+    """Wird beim Speichern des Tagesjournals aufgerufen (siehe pages/1_🏠_Home.py) - eigenständiger
+    zweiter Trigger neben compute_daily_summary(). Aktualisiert NUR die drei Journal-Spiegel-
+    Spalten (legt die Zeile an, falls sie noch nicht existiert) und frischt notable_events_text
+    anhand des bereits vorhandenen overreach_flag auf (journal_filled wird jetzt wahr) - berechnet
+    aber keine objektiven Kennzahlen neu, die ändern sich durch einen Journal-Eintrag nicht.
+    Reihenfolge-unabhängig zu compute_daily_summary(): beide Trigger lassen die jeweils andere
+    Spalten-Gruppe unangetastet (upsert_daily_metric() aktualisiert nur die übergebenen Spalten)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    existing = cursor.execute(
+        "SELECT overreach_flag, days_until_next_race, hrv_vs_7d_avg_pct, sleep_vs_7d_avg_pct, "
+        "resting_hr_vs_7d_avg_pct, acute_chronic_ratio FROM daily_summary WHERE date = ?",
+        (target_date,)
+    ).fetchone()
+    conn.close()
+
+    overreach = existing["overreach_flag"] if existing else 0
+    notable_text = _notable_events_text(
+        overreach, True,
+        existing["days_until_next_race"] if existing else None,
+        existing["hrv_vs_7d_avg_pct"] if existing else None,
+        existing["sleep_vs_7d_avg_pct"] if existing else None,
+        existing["resting_hr_vs_7d_avg_pct"] if existing else None,
+        existing["acute_chronic_ratio"] if existing else None,
+    )
+
+    upsert_daily_metric("daily_summary", {
+        "date": target_date,
+        "journal_rpe": rpe,
+        "journal_soreness": soreness,
+        "journal_energy_level": energy,
         "notable_events_text": notable_text,
     })

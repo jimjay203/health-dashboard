@@ -16,7 +16,6 @@ st.title("📊 Health & Training Trends")
 conn = get_connection()
 df_garmin = pd.read_sql_query("SELECT * FROM garmin_daily ORDER BY date ASC", conn)
 df_journal = pd.read_sql_query("SELECT * FROM daily_journal ORDER BY date ASC", conn)
-df_ai = pd.read_sql_query("SELECT * FROM ai_coach_insights ORDER BY date ASC", conn)
 df_readiness = pd.read_sql_query("SELECT date, score FROM garmin_training_readiness ORDER BY date ASC", conn)
 df_weigh_ins = pd.read_sql_query("SELECT date, weight FROM garmin_weigh_ins ORDER BY date ASC", conn)
 df_events = pd.read_sql_query("SELECT event_date, title, is_race, distance_meters, activity_type_id FROM garmin_scheduled_events ORDER BY event_date ASC", conn)
@@ -280,18 +279,13 @@ else:
             st.plotly_chart(fig_sleep, use_container_width=True)
 
     with col2:
-        # 3. Readiness Score Verlauf: KI-Score vs. Garmins eigener Trainingsbereitschafts-Score
-        st.subheader("🎯 Trainingsbereitschaft: KI vs. Garmin")
-        if not df_ai.empty or not df_readiness.empty:
+        # 3. Readiness Score Verlauf: Garmins eigener Trainingsbereitschafts-Score
+        st.subheader("🎯 Trainingsbereitschaft (Garmin)")
+        if not df_readiness.empty:
             fig_readiness = go.Figure()
-            if not df_ai.empty:
-                fig_readiness.add_trace(go.Scatter(
-                    x=df_ai["date"], y=df_ai["readiness_score"], mode="lines+markers", name="KI-Score"
-                ))
-            if not df_readiness.empty:
-                fig_readiness.add_trace(go.Scatter(
-                    x=df_readiness["date"], y=df_readiness["score"], mode="lines+markers", name="Garmin-Score"
-                ))
+            fig_readiness.add_trace(go.Scatter(
+                x=df_readiness["date"], y=df_readiness["score"], mode="lines+markers", name="Garmin-Score"
+            ))
             fig_readiness.update_layout(
                 yaxis_range=[0, 100], yaxis_title="Score (0-100)", xaxis_title="Datum",
                 title="Bereitschafts-Score über Zeit"

@@ -1,7 +1,6 @@
 import streamlit as st
 from db import init_db
 from insight_memory import (
-    get_current_compressed_text,
     list_raw_entries,
     list_compressed_versions,
     add_raw_entry,
@@ -13,10 +12,10 @@ init_db()
 
 st.title("🧠 Erkenntnis-Gedächtnis")
 st.caption(
-    "Schicht 3 der KI-Chat-Vorbereitung: ein kompaktes, sich selbst aktualisierendes "
-    "Wissens-Gedächtnis über dich als Athlet - gespeist aus deinen manuellen Einträgen unten "
-    "und täglich automatisch aus den Trainings-/Erholungskennzahlen. Nutzt Gemini, im Gegensatz "
-    "zu den rein regelbasierten Schicht 1/2-Auswertungen."
+    "Schicht 3 der KI-Chat-Vorbereitung: Zusatzinfos, die sich nicht aus den Trainingsdaten "
+    "ablesen lassen (z.B. feste Wochenroutinen wie Vereinstraining), in deinen eigenen Worten. "
+    "Gemini dampft deine Einträge unten auf das Wesentliche ein, damit der komplette Text später "
+    "günstig als Kontext für einen KI-Chat mitgegeben werden kann."
 )
 
 st.divider()

@@ -4,7 +4,8 @@ import pandas as pd
 import plotly.express as px
 from datetime import date, timedelta
 from db import get_connection, save_journal_entry, init_db
-from ai_coach import generate_daily_coaching
+from daily_summary import sync_journal_columns
+from insight_memory import add_raw_entry
 
 # Schlafphasen-Chart (Test): Farben aus der validierten Default-Palette, aber diese konkrete
 # 4er-Kombination (blau/aqua/violett/rot) konnte in dieser Umgebung nicht automatisiert gegen
@@ -42,7 +43,7 @@ def translate_feedback(code):
 st.set_page_config(page_title="Tagesübersicht", page_icon="🏠", layout="wide")
 init_db()
 
-st.title("🏠 Tagesübersicht & KI-Coach")
+st.title("🏠 Tagesübersicht")
 
 # Datums-Auswahl oben rechts
 selected_date = st.date_input("Datum auswählen", value=date.today())
@@ -53,9 +54,6 @@ conn = get_connection()
 cursor = conn.cursor()
 cursor.execute("SELECT * FROM garmin_daily WHERE date = ?", (date_str,))
 garmin = cursor.fetchone()
-
-cursor.execute("SELECT * FROM ai_coach_insights WHERE date = ?", (date_str,))
-ai_insight = cursor.fetchone()
 
 cursor.execute("SELECT * FROM daily_journal WHERE date = ?", (date_str,))
 journal = cursor.fetchone()
@@ -124,62 +122,22 @@ with st.expander("Journal bearbeiten" if journal else "📝 Journal jetzt ausfü
         submitted = st.form_submit_button("Journal-Eintrag speichern 💾")
         if submitted:
             save_journal_entry(date_str, rpe, soreness, energy, notes)
+            sync_journal_columns(date_str, rpe, soreness, energy)
+            if notes and notes.strip():
+                # Freitext fließt automatisch ins Erkenntnis-Gedächtnis (Schicht 3) ein - löst
+                # dessen bestehende Sofort-Verdichtung aus. Ein Gemini-Fehler hier darf das
+                # bereits erfolgreich gespeicherte Journal nicht als Fehlschlag erscheinen lassen.
+                try:
+                    add_raw_entry(notes.strip(), source="journal")
+                except Exception as e:
+                    st.warning(f"Journal gespeichert, aber Verdichtung ins Erkenntnis-Gedächtnis fehlgeschlagen: {e}")
             st.success("Tagesjournal gespeichert!")
             st.rerun()
 
 st.divider()
 
-# --- BEREICH 2: KI COACH INSIGHTS ---
-coach_header_col, coach_status_col = st.columns([3, 1])
-with coach_header_col:
-    st.subheader("🤖 KI-Coach Auswertung")
-with coach_status_col:
-    if ai_insight:
-        st.success("✅ Abgefragt")
-    else:
-        st.info("⏳ Offen")
-
-if ai_insight:
-    # Empfehlungen zuerst und auf einen Blick lesbar - der ausführliche Begründungstext
-    # (coaching_advice) steht bewusst erst im Expander darunter, nicht direkt im Fließtext.
-    if ai_insight["training_focus"]:
-        st.markdown(f"#### 🎯 {ai_insight['training_focus']}")
-
-    recommendations = json.loads(ai_insight["key_recommendations"]) if ai_insight["key_recommendations"] else []
-    if recommendations:
-        for rec in recommendations:
-            st.markdown(f"- **{rec}**")
-    else:
-        st.markdown(f"**{ai_insight['status_summary']}**")
-
-    with st.expander("Ausführliche Begründung"):
-        st.caption(ai_insight["status_summary"])
-        st.write(ai_insight["coaching_advice"])
-else:
-    st.info("Noch keine KI-Analyse für diesen Tag vorhanden.")
-
-if st.button("🤖 Analyse jetzt von Gemini generieren / aktualisieren"):
-    with st.spinner("Gemini analysiert deine Daten und berechnet den Score..."):
-        try:
-            res = generate_daily_coaching(date_str)
-            if "error" in res:
-                st.warning(res["error"])
-            else:
-                st.rerun()
-        except Exception as e:
-            st.error(f"Fehler bei der KI-Analyse: {e}")
-
-st.divider()
-
 # --- BEREICH 3: METRIKEN & BEREITSCHAFTS-SCORE ---
-col_score, col_m1, col_m2, col_m3, col_m4 = st.columns([1.5, 1, 1, 1, 1])
-
-with col_score:
-    if ai_insight:
-        score = ai_insight["readiness_score"]
-        st.metric("🤖 KI-Score", f"{score} / 100")
-    else:
-        st.metric("🤖 KI-Score", "-- / 100")
+col_m1, col_m2, col_m3, col_m4 = st.columns(4)
 
 with col_m1:
     st.metric("😴 Schlaf", f"{garmin['sleep_hours']} h" if garmin and garmin['sleep_hours'] else "--",
