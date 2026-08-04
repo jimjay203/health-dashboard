@@ -649,6 +649,37 @@ def init_db():
     )
     """)
 
+    # Schicht 3 der KI-Chat-Vorbereitung: LLM-gestütztes Erkenntnis-Gedächtnis (siehe
+    # insight_memory.py). insight_memory_raw wird nie von der KI verändert/gelöscht (Archiv).
+    # insight_memory_compressed ist bewusst append-only - jede neue Version eine eigene Zeile
+    # (hochzählendes version), damit die Entwicklung des verdichteten Textes nachvollziehbar bleibt.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS insight_memory_raw (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        raw_text TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT 'user' CHECK(source IN ('user', 'claude_import'))
+    )
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS insight_memory_compressed (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        compressed_text TEXT,
+        version INTEGER NOT NULL
+    )
+    """)
+
+    # Trigger-Gate für den täglichen Teil-B-Lauf: verhindert mehrfache Gemini-Calls, falls der
+    # Garmin-Sync mehrmals am selben Tag läuft (siehe garmin_service.py).
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS insight_memory_daily_run (
+        date TEXT PRIMARY KEY,
+        ran_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
     conn.commit()
     conn.close()
 

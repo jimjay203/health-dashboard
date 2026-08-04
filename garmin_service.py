@@ -8,6 +8,7 @@ from db import save_garmin_data, upsert_daily_metric, replace_timeseries, upsert
 from training_zones import recompute_zones
 from daily_summary import compute_daily_summary
 from weekly_summary import compute_weekly_summary
+from insight_memory import run_daily_memory_update
 
 
 def _pause():
@@ -128,6 +129,10 @@ def fetch_and_store_garmin_data(target_date=None, client=None):
     # bei jedem Backfill-Tag denselben Snapshot redundant neu zu berechnen.
     if target_date == date.today().isoformat():
         recompute_zones(target_date)
+        # Schicht 3 der KI-Chat-Vorbereitung: eigenes Trigger-Gate in run_daily_memory_update()
+        # sorgt zusätzlich dafür, dass der Gemini-Call pro Kalendertag höchstens einmal läuft,
+        # selbst bei mehrmals täglichem Sync.
+        run_daily_memory_update(target_date)
 
     # daily_summary/weekly_summary laufen bewusst unconditional (auch für Backfill-Tage), anders
     # als recompute_zones oben - Schicht 1+2 der KI-Chat-Vorbereitung sollen für jeden importierten

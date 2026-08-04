@@ -1,12 +1,9 @@
-import os
 import json
 import sqlite3
 from datetime import date
-from google import genai
 from google.genai import types
 from db import get_connection
-
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+from gemini_client import GEMINI_API_KEY, MODEL_NAME, get_client
 
 
 def _fetch_dict(cursor, table, target_date):
@@ -131,9 +128,9 @@ def generate_daily_coaching(target_date=None):
     }
 
     # Gemini API Aufruf
-    client = genai.Client(api_key=GEMINI_API_KEY)
+    client = get_client()
     response = client.models.generate_content(
-        model='models/gemini-3.5-flash',  # ✅ Aktuelles Flash-Modell
+        model=MODEL_NAME,
         contents=user_input,
         config=types.GenerateContentConfig(
             system_instruction=system_prompt,
