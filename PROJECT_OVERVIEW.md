@@ -92,6 +92,27 @@ Ein früherer separater KI-Coach (`ai_coach.py`, Gemini-Tagesform-Score/-Empfehl
 Knopfdruck, Tabelle `ai_coach_insights`) wurde **komplett entfernt** (Datei, Tabelle, UI,
 zugehöriger Chart auf der Health-Trends-Seite).
 
+## Workout Builder (`workout_builder.py`)
+
+Erstellt strukturierte Garmin-Workouts (Warmup/Intervalle/Erholung/Cooldown) programmatisch und
+lädt sie hoch - reine Python-Logik, kein `streamlit`-Import (gleiches Portabilitäts-Prinzip wie
+`daily_summary.py`/`insight_memory.py`). `build_interval_running_workout(...)` baut ein
+`RunningWorkout`-Objekt (kein Upload); `upload_workout(workout, client, schedule_date=None)` lädt
+es separat hoch. Pace-/Zonen-Ziele kommen aus `training_zones_running` (kein Freitext-Parsing -
+das ist einer späteren Chat-Schicht vorbehalten). UI unter `pages/6_🏗️_Workout_Builder.py`.
+
+**Wichtige Ground-Truth-Funde (live gegen Garmins Server verifiziert, nicht aus Doku):** Das
+installierte `garminconnect==0.3.2` hat mehrere falsche Konstanten in `garminconnect/workout.py`:
+`ConditionType.DISTANCE` ist fälschlich `1` (tatsächlich `"lap.button"`, echte Distanz-ID ist
+`3`), `TargetType.OPEN` ist fälschlich `6` (tatsächlich `"pace.zone"`, kein offenes Ziel). Pace-
+Ziele werden intern immer in **m/s** übertragen; `speed.zone` (ID 5, km/h-Anzeige) und `pace.zone`
+(ID 6, min/km-Anzeige) unterscheiden sich zusätzlich in der Reihenfolge von `targetValueOne`/Two
+(bei `pace.zone`: One = schnellere, Two = langsamere Grenze - umgekehrt zu `speed.zone`).
+`workout_builder.py` verwendet ausschließlich `pace.zone`. Für mehrsegmentige Workouts, die nicht
+in die generische Signatur passen, werden die Low-Level-Bausteine (`_build_step`,
+`_zone_pace_bounds_m_s`, `_zone_range_pace_bounds_m_s` für Ziele über mehrere Zonen hinweg wie
+"5b bis 5c") direkt in einem Testskript wiederverwendet (siehe `test_workout_marathon_tempo.py`).
+
 ## Datei-Übersicht
 
 | Datei | Zweck |
@@ -110,11 +131,15 @@ zugehöriger Chart auf der Health-Trends-Seite).
 | `insight_memory.py` | Schicht 3, nutzergeschriebenes Erkenntnis-Gedächtnis |
 | `gemini_client.py` | Gemeinsame Gemini-Konfiguration (Key/Modell/Client) |
 | `backfill_2026.py` | Stand-alone-CLI-Skript für einen einmaligen historischen Backfill (nicht Teil der App) |
+| `workout_builder.py` | Erstellt/lädt strukturierte Garmin-Workouts (Pace-/Zonen-Ziele) |
+| `test_workout_builder.py` | Testskript: einfaches Intervall-Workout (build_interval_running_workout) |
+| `test_workout_marathon_tempo.py` | Testskript: mehrsegmentiges Workout mit Low-Level-Bausteinen |
 | `pages/1_🏠_Home.py` | Tagesjournal (löst Journal-Integration aus), Trainingsbereitschaft, Schicht-1/2-Kennzahlen |
 | `pages/2_📊_Health_Trends.py` | Renn-/Workout-Kalender, Endurance-Score, Trends nach Sportart |
 | `pages/3_⚙️_Settings.py` | Sync (Einzel/Backfill), API-Exploration, Aktivitäten-Sync |
 | `pages/4_🏃_Aktivitäten.py` | Aktivitäts-Liste/-Filter/-Detailcharts inkl. GPS-Route |
 | `pages/5_🧠_Erkenntnisse.py` | UI für Schicht 3 (Einträge hinzufügen/löschen, aktueller Stand) |
+| `pages/6_🏗️_Workout_Builder.py` | Formular zum Erstellen/Hochladen strukturierter Workouts |
 
 ## Datenbank (Auszug nach Kategorie, `db.py`)
 
