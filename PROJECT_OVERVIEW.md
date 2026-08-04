@@ -111,7 +111,7 @@ Ziele werden intern immer in **m/s** übertragen; `speed.zone` (ID 5, km/h-Anzei
 `workout_builder.py` verwendet ausschließlich `pace.zone`. Für mehrsegmentige Workouts, die nicht
 in die generische Signatur passen, werden die Low-Level-Bausteine (`_build_step`,
 `_zone_pace_bounds_m_s`, `_zone_range_pace_bounds_m_s` für Ziele über mehrere Zonen hinweg wie
-"5b bis 5c") direkt in einem Testskript wiederverwendet (siehe `test_workout_marathon_tempo.py`).
+"5b bis 5c") direkt in einem Testskript wiederverwendet (siehe `examples/test_workout_marathon_tempo.py`).
 
 ## Datei-Übersicht
 
@@ -130,10 +130,9 @@ in die generische Signatur passen, werden die Low-Level-Bausteine (`_build_step`
 | `weekly_summary.py` | Schicht 2, pro-Woche-Kennzahlen |
 | `insight_memory.py` | Schicht 3, nutzergeschriebenes Erkenntnis-Gedächtnis |
 | `gemini_client.py` | Gemeinsame Gemini-Konfiguration (Key/Modell/Client) |
-| `backfill_2026.py` | Stand-alone-CLI-Skript für einen einmaligen historischen Backfill (nicht Teil der App) |
 | `workout_builder.py` | Erstellt/lädt strukturierte Garmin-Workouts (Pace-/Zonen-Ziele) |
-| `test_workout_builder.py` | Testskript: einfaches Intervall-Workout (build_interval_running_workout) |
-| `test_workout_marathon_tempo.py` | Testskript: mehrsegmentiges Workout mit Low-Level-Bausteinen |
+| `examples/test_workout_builder.py` | Beispiel: einfaches Intervall-Workout (build_interval_running_workout), `python3 -m examples.test_workout_builder` |
+| `examples/test_workout_marathon_tempo.py` | Beispiel: mehrsegmentiges Workout mit Low-Level-Bausteinen |
 | `pages/1_🏠_Home.py` | Tagesjournal (löst Journal-Integration aus), Trainingsbereitschaft, Schicht-1/2-Kennzahlen |
 | `pages/2_📊_Health_Trends.py` | Renn-/Workout-Kalender, Endurance-Score, Trends nach Sportart |
 | `pages/3_⚙️_Settings.py` | Sync (Einzel/Backfill), API-Exploration, Aktivitäten-Sync |

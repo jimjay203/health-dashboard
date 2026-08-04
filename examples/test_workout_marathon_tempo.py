@@ -11,6 +11,10 @@ Angabe (anders als alle anderen Blöcke) - deshalb hier ohne Zielwert (NO_TARGET
 
 Zeigt die gebaute Struktur, lädt NICHT automatisch hoch - der Upload-Block steht auskommentiert
 am Ende.
+
+Ausführen vom Repo-Root aus (nicht direkt als examples/test_workout_marathon_tempo.py - sonst
+findet Python die Module im Root wie garmin_auth/workout_builder nicht):
+    python3 -m examples.test_workout_marathon_tempo
 """
 import json
 from garmin_auth import get_garmin_client

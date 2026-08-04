@@ -13,6 +13,7 @@ Gebaut als Streamlit-Multi-Page-App, per Docker Compose deploybar.
 - **🏠 Tagesübersicht**: subjektives Tagesjournal (RPE, Muskelkater, Energie), Garmins eigener Trainingsbereitschafts-Score mit verständlicher Einordnung ("Hauptgrund: Erholungszeit ist aktuell Schlecht"), Trainingslast-/Form-Kennzahlen (ACWR, CTL/ATL/TSB)
 - **📊 Health Trends**: fortlaufender Renn-/Workout-Kalender mit sportspezifischen Icons, Endurance-Score-Einordnung anhand von Garmins eigenen Klassifizierungs-Schwellenwerten, HRV/Ruhepuls-, Schlaf-, Gewichts- und Readiness-Trends
 - **🏃 Aktivitäten**: manueller Sync von Läufen/Rad/Schwimmen inkl. optionaler Sekunden-Detail-Zeitreihen (GPS/HF/Leistung), Filter, Detailcharts und GPS-Route
+- **🏗️ Workout Builder**: strukturierte Intervall-Lauf-Workouts (Warmup/Intervalle/Erholung/Cooldown) per Formular erstellen und direkt zu Garmin Connect hochladen, Pace-Ziele aus den aktuellen Trainingszonen
 - **⚙️ Settings**: Einzel-Sync, Zeitraum-Backfill, Aktivitäten-Sync sowie eine API-Explorationsfunktion, die alle relevanten Garmin-Endpunkte einmal testweise abruft und die rohen JSON-Antworten anzeigt/speichert
 
 ## 🧱 Tech Stack
@@ -86,6 +87,7 @@ pages/
   3_⚙️_Settings.py            # Sync, Backfill, API-Exploration, Aktivitäten-Sync
   4_🏃_Aktivitäten.py         # Aktivitäts-Liste, Filter, Detailcharts, GPS-Route
   5_🧠_Erkenntnisse.py        # UI fürs Erkenntnis-Gedächtnis
+  6_🏗️_Workout_Builder.py     # Formular zum Erstellen/Hochladen strukturierter Workouts
 db.py                        # SQLite-Schema & generische Upsert-/Zeitreihen-Helper
 garmin_auth.py                # Login & Token-Caching
 garmin_service.py            # Kern-Sync + alle erweiterten Metrik-Gruppen
@@ -98,7 +100,8 @@ training_zones.py            # Friel-Trainingszonen aus Schwellenwerten
 weekly_summary.py            # Regelbasierte Wochen-Kennzahlen
 insight_memory.py            # LLM-gestütztes Erkenntnis-Gedächtnis
 gemini_client.py             # Gemeinsame Gemini-Konfiguration
-backfill_2026.py             # Stand-alone-CLI-Skript für einmaligen historischen Backfill
+workout_builder.py           # Erstellt/lädt strukturierte Garmin-Workouts
+examples/                    # Eigenständige Nutzungsbeispiele (kein UI), z.B. für workout_builder.py
 ```
 
 Ein technischer Gesamtüberblick (Architektur, Konventionen, Datenbank-Kategorien) steht in

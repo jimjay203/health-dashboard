@@ -4,6 +4,10 @@ Schwellentraining aus einer früheren Besprechung ("10 min Einlaufen Z1, 6x1000m
 mit 90s Trabpause, 10 min Auslaufen Z1") mit fest hinterlegten Werten, zeigt die gebaute
 Workout-Struktur zur Kontrolle an und lädt NICHT automatisch hoch.
 
+Ausführen vom Repo-Root aus (nicht direkt als examples/test_workout_builder.py - sonst findet
+Python die Module im Root wie garmin_auth/workout_builder nicht):
+    python3 -m examples.test_workout_builder
+
 Zum echten Hochladen: den auskommentierten Block ganz unten aktivieren und erneut ausführen.
 """
 import json
