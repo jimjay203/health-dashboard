@@ -697,6 +697,18 @@ def init_db():
     # insight_memory_daily_run war ein Fehldesign und wurde ersatzlos gestrichen.
     cursor.execute("DROP TABLE IF EXISTS insight_memory_daily_run")
 
+    # Schicht 4: persistenter Chat-Verlauf (siehe chat_engine.py) - bewusst in der DB statt nur
+    # Streamlit-session_state, damit beim künftigen FastAPI-Umbau kein State migriert werden muss.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS chat_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        tool_calls_json TEXT
+    )
+    """)
+
     conn.commit()
     conn.close()
 

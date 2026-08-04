@@ -1,6 +1,6 @@
 # 🏃‍♂️ Health & Performance Dashboard
 
-Ein persönliches Trainings-Dashboard für Ausdauersportler (Läufer/Triathleten), das Garmin-Connect-Daten automatisch synchronisiert, in SQLite speichert und regelbasiert auswertet — inklusive Renn-Kalender, Trainingsbereitschafts-Einordnung, Leistungs-Trends und einem LLM-gestützten Erkenntnis-Gedächtnis (Google Gemini).
+Ein persönliches Trainings-Dashboard für Ausdauersportler (Läufer/Triathleten), das Garmin-Connect-Daten automatisch synchronisiert, in SQLite speichert und regelbasiert auswertet — inklusive Renn-Kalender, Trainingsbereitschafts-Einordnung, Leistungs-Trends, einem LLM-gestützten Erkenntnis-Gedächtnis und einem Chat mit Datenzugriff und Workout-Erstellung (Google Gemini).
 
 Gebaut als Streamlit-Multi-Page-App, per Docker Compose deploybar.
 
@@ -14,6 +14,7 @@ Gebaut als Streamlit-Multi-Page-App, per Docker Compose deploybar.
 - **📊 Health Trends**: fortlaufender Renn-/Workout-Kalender mit sportspezifischen Icons, Endurance-Score-Einordnung anhand von Garmins eigenen Klassifizierungs-Schwellenwerten, HRV/Ruhepuls-, Schlaf-, Gewichts- und Readiness-Trends
 - **🏃 Aktivitäten**: manueller Sync von Läufen/Rad/Schwimmen inkl. optionaler Sekunden-Detail-Zeitreihen (GPS/HF/Leistung), Filter, Detailcharts und GPS-Route
 - **🏗️ Workout Builder**: strukturierte Intervall-Lauf-Workouts (Warmup/Intervalle/Erholung/Cooldown) per Formular erstellen und direkt zu Garmin Connect hochladen, Pace-Ziele aus den aktuellen Trainingszonen
+- **💬 Chat** (Gemini, `chat_engine.py`): beantwortet Fragen zu den Trainingsdaten (Whitelist-SQL-Zugriff auf die regelbasierten Auswertungen) und kann Workouts vorschlagen/hochladen — Vorschlag und Upload sind strukturell auf zwei getrennte Nachrichten aufgeteilt, kein automatisches Verketten
 - **⚙️ Settings**: Einzel-Sync, Zeitraum-Backfill, Aktivitäten-Sync sowie eine API-Explorationsfunktion, die alle relevanten Garmin-Endpunkte einmal testweise abruft und die rohen JSON-Antworten anzeigt/speichert
 
 ## 🧱 Tech Stack
@@ -21,7 +22,7 @@ Gebaut als Streamlit-Multi-Page-App, per Docker Compose deploybar.
 - [Streamlit](https://streamlit.io/) (Multi-Page App)
 - SQLite (über `sqlite3`, kein ORM)
 - [garminconnect](https://github.com/cyberjunky/python-garminconnect) für den Garmin-API-Zugriff
-- [google-genai](https://github.com/googleapis/python-genai) (Gemini) für das Erkenntnis-Gedächtnis
+- [google-genai](https://github.com/googleapis/python-genai) (Gemini) für Erkenntnis-Gedächtnis und Chat
 - Plotly/pydeck für Charts & Karten
 - Docker Compose für den Betrieb
 
@@ -88,6 +89,7 @@ pages/
   4_🏃_Aktivitäten.py         # Aktivitäts-Liste, Filter, Detailcharts, GPS-Route
   5_🧠_Erkenntnisse.py        # UI fürs Erkenntnis-Gedächtnis
   6_🏗️_Workout_Builder.py     # Formular zum Erstellen/Hochladen strukturierter Workouts
+  7_💬_Chat.py                # Chat-UI (Schicht 4)
 db.py                        # SQLite-Schema & generische Upsert-/Zeitreihen-Helper
 garmin_auth.py                # Login & Token-Caching
 garmin_service.py            # Kern-Sync + alle erweiterten Metrik-Gruppen
@@ -101,7 +103,8 @@ weekly_summary.py            # Regelbasierte Wochen-Kennzahlen
 insight_memory.py            # LLM-gestütztes Erkenntnis-Gedächtnis
 gemini_client.py             # Gemeinsame Gemini-Konfiguration
 workout_builder.py           # Erstellt/lädt strukturierte Garmin-Workouts
-examples/                    # Eigenständige Nutzungsbeispiele (kein UI), z.B. für workout_builder.py
+chat_engine.py                # Schicht 4: Chat mit Function-Calling (Query-Tool, Workout-Vorschlag/-Upload)
+examples/                    # Eigenständige Nutzungsbeispiele (kein UI), z.B. für workout_builder.py/chat_engine.py
 ```
 
 Ein technischer Gesamtüberblick (Architektur, Konventionen, Datenbank-Kategorien) steht in

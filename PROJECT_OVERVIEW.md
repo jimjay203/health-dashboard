@@ -7,8 +7,9 @@ damit Feature-Diskussionen ohne erneutes Codebase-Exploring starten können. Wir
 
 **Zweck des Projekts:** Persönliches Trainings-Dashboard für einen Marathon-/Triathlon-Athleten
 (SWB Marathon Bremen 13.09.2026, GEWOBA City Triathlon 09.08.2026). Synchronisiert Garmin-Connect-
-Daten, speichert sie in SQLite, wertet sie regelbasiert aus und pflegt ein LLM-gestütztes
-Wissens-Gedächtnis (Schicht 3, siehe unten). Streamlit-Multi-Page-App, Docker-Compose-Betrieb.
+Daten, speichert sie in SQLite, wertet sie regelbasiert aus, pflegt ein LLM-gestütztes
+Wissens-Gedächtnis (Schicht 3) und bietet einen Chat (Schicht 4) mit Datenzugriff und
+Workout-Erstellung. Streamlit-Multi-Page-App, Docker-Compose-Betrieb.
 
 ## Tech-Stack
 
@@ -45,9 +46,9 @@ hämmern.
 UPDATE`-Upserts oder Delete+Insert-Zeitreihen-Ersetzung) — sicher gegen Duplikate/Datenverlust,
 siehe Konventionen unten.
 
-## Die drei "Schichten" der KI-Chat-Vorbereitung
+## Die vier "Schichten" der KI-Chat-Vorbereitung
 
-Aufbauender regelbasierter Kontext für einen künftigen Chat (noch nicht gebaut):
+Aufbauender Kontext für den Chat (Schicht 4, siehe eigener Abschnitt unten):
 
 - **Schicht 1** (`daily_summary.py`, `activity_analytics.py`, `training_zones.py`): pro Tag bzw.
   pro Aktivität vorverdichtete Kennzahlen — HRV/Schlaf/Ruhepuls vs. Baseline, Trainingslast (7/28
@@ -74,8 +75,11 @@ Aufbauender regelbasierter Kontext für einen künftigen Chat (noch nicht gebaut
   verworfen, weil das Gedächtnis dadurch nur ein Trainingstagebuch dupliziert hätte statt echte,
   dauerhafte Athleten-Erkenntnisse zu sammeln.
 
-`gemini_client.py` bündelt die Gemini-Konfiguration (API-Key, Modell, Client-Erzeugung) - aktuell
-einziger Nutzer ist `insight_memory.py`.
+- **Schicht 4** (`chat_engine.py`): der eigentliche Chat, baut auf Schicht 1-3 und
+  `workout_builder.py` auf. Siehe eigener Abschnitt unten.
+
+`gemini_client.py` bündelt die Gemini-Konfiguration (API-Key, Modell, Client-Erzeugung) - Nutzer
+sind `insight_memory.py` und `chat_engine.py`.
 
 ## Journal-Integration
 
@@ -113,6 +117,40 @@ in die generische Signatur passen, werden die Low-Level-Bausteine (`_build_step`
 `_zone_pace_bounds_m_s`, `_zone_range_pace_bounds_m_s` für Ziele über mehrere Zonen hinweg wie
 "5b bis 5c") direkt in einem Testskript wiederverwendet (siehe `examples/test_workout_marathon_tempo.py`).
 
+## Chat (`chat_engine.py`, Schicht 4)
+
+`ChatEngine` (kein `streamlit`-Import) - ein Objekt = eine Konversation. `send_message(text) -> str`
+ist der einzige öffentliche Einstiegspunkt, intern eine Gemini-Function-Calling-Schleife (max. 8
+Runden) mit drei Tools:
+
+- **`run_readonly_query(sql)`**: SELECT-only gegen eine feste Tabellen-Whitelist (`daily_summary`,
+  `weekly_summary`, `insight_memory_compressed`, `garmin_activities`, alle drei
+  `training_zones_*`-Tabellen) - separate Read-Only-Connection (`sqlite3.connect(...,
+  mode=ro, uri=True)`), kein Semikolon/Chaining, Row-Limit 100, Wall-Clock-Timeout per
+  `set_progress_handler`, `garmin_activities.raw_json` wird in der Ausgabe immer ausgeblendet. Bei
+  jedem Fehler (verbotene Tabelle, Syntax, Timeout) ein verständlicher String statt Crash.
+- **`propose_workout(...)`/`confirm_and_upload_workout(proposal_id)`**: dünne Wrapper um
+  `build_interval_running_workout()`/`upload_workout()` aus `workout_builder.py`. **Turn-Trennung
+  ist die kritischste Design-Entscheidung**: ein `_turn_counter` (erhöht sich NUR in
+  `send_message()`, nie innerhalb der internen Function-Calling-Schleife) stempelt jeden
+  `propose_workout`-Vorschlag; `confirm_and_upload_workout` lehnt jeden Versuch strukturell ab,
+  bei dem `turn_id` des Vorschlags == aktueller `turn_id` ist - unabhängig vom System-Prompt-Text
+  und unabhängig davon, ob Gemini parallele Function-Calls in einer Antwort probiert. Live
+  verifiziert: `types.Tool(function_declarations=[...])` (Schema-Objekte statt echter Python-
+  Callables) löst kein automatisches SDK-Chaining aus, war aber laut Team-Entscheidung trotzdem
+  nicht als alleinige Absicherung ausreichend.
+- Vorschläge (`_pending_proposals`) leben bewusst nur im `ChatEngine`-Objekt (Session-Zustand,
+  nicht DB) - anders als `chat_history` (Konversation selbst, PK `id`, append-only, `role`
+  `user`/`assistant`, `tool_calls_json`), die bewusst in der DB liegt, damit beim künftigen
+  FastAPI-Umbau kein Streamlit-`session_state` migriert werden muss.
+
+Kontext pro Nachricht (System Instruction, bei jedem `send_message()` neu zusammengesetzt, da
+Gemini-Calls zustandslos sind): kompakte Tabellen-Beschreibung der Whitelist (Spalten live per
+`PRAGMA table_info`, Beschreibungstext hartkodiert), kompletter `insight_memory_compressed`-Text,
+heutige `daily_summary`-Zeile falls vorhanden - explizit NICHT die volle Datenhistorie (dafür ist
+`run_readonly_query` da). UI: `pages/7_💬_Chat.py` (hält die `ChatEngine` in `st.session_state`,
+zeigt `tool_calls_json` je Antwort in einem Debug-Expander). CLI-Alternative: `examples/chat_cli.py`.
+
 ## Datei-Übersicht
 
 | Datei | Zweck |
@@ -131,14 +169,17 @@ in die generische Signatur passen, werden die Low-Level-Bausteine (`_build_step`
 | `insight_memory.py` | Schicht 3, nutzergeschriebenes Erkenntnis-Gedächtnis |
 | `gemini_client.py` | Gemeinsame Gemini-Konfiguration (Key/Modell/Client) |
 | `workout_builder.py` | Erstellt/lädt strukturierte Garmin-Workouts (Pace-/Zonen-Ziele) |
+| `chat_engine.py` | Schicht 4: `ChatEngine` mit Function-Calling (Query-Tool, Workout-Vorschlag/-Upload) |
 | `examples/test_workout_builder.py` | Beispiel: einfaches Intervall-Workout (build_interval_running_workout), `python3 -m examples.test_workout_builder` |
 | `examples/test_workout_marathon_tempo.py` | Beispiel: mehrsegmentiges Workout mit Low-Level-Bausteinen |
+| `examples/chat_cli.py` | Terminal-Testskript für chat_engine.py, `python3 -m examples.chat_cli` |
 | `pages/1_🏠_Home.py` | Tagesjournal (löst Journal-Integration aus), Trainingsbereitschaft, Schicht-1/2-Kennzahlen |
 | `pages/2_📊_Health_Trends.py` | Renn-/Workout-Kalender, Endurance-Score, Trends nach Sportart |
 | `pages/3_⚙️_Settings.py` | Sync (Einzel/Backfill), API-Exploration, Aktivitäten-Sync |
 | `pages/4_🏃_Aktivitäten.py` | Aktivitäts-Liste/-Filter/-Detailcharts inkl. GPS-Route |
 | `pages/5_🧠_Erkenntnisse.py` | UI für Schicht 3 (Einträge hinzufügen/löschen, aktueller Stand) |
 | `pages/6_🏗️_Workout_Builder.py` | Formular zum Erstellen/Hochladen strukturierter Workouts |
+| `pages/7_💬_Chat.py` | UI für Schicht 4 (ChatEngine in st.session_state, Tool-Aufruf-Debug-Expander) |
 
 ## Datenbank (Auszug nach Kategorie, `db.py`)
 
@@ -153,7 +194,7 @@ in die generische Signatur passen, werden die Low-Level-Bausteine (`_build_step`
 - **Wochen/Sonstiges:** `weekly_summary` (PK `week_id`), `garmin_weigh_ins` (PK Garmins
   `sample_pk`), `garmin_personal_records`/`garmin_goals`/`garmin_training_plans` (PK Garmins `id`)
 - **KI-bezogen:** `insight_memory_raw`, `insight_memory_compressed` (append-only), `daily_journal`
-  (subjektive Nutzereingaben, PK `date`)
+  (subjektive Nutzereingaben, PK `date`), `chat_history` (Schicht-4-Konversation, append-only)
 
 ## Wichtige Konventionen
 
@@ -171,4 +212,7 @@ in die generische Signatur passen, werden die Low-Level-Bausteine (`_build_step`
 
 ## Bekannte offene Baustellen / in Diskussion
 
-- "Schicht 4" (der eigentliche KI-Chat auf Basis von Schicht 1-3) ist noch nicht begonnen.
+- `pages/7_💬_Chat.py` hält die `ChatEngine`-Instanz in `st.session_state` (Turn-Zähler/
+  Vorschläge sind Objektzustand, siehe oben) - ein Browser-Reload startet also eine neue
+  Konversation im Sinne von `_pending_proposals`/`_turn_counter`, auch wenn `chat_history` in der
+  DB weiterhin den alten Verlauf anzeigt. Bekannte, akzeptierte Eigenschaft, kein Bug.
