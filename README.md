@@ -13,7 +13,8 @@ Gebaut als Streamlit-Multi-Page-App, per Docker Compose deploybar.
 - **🏠 Tagesübersicht**: subjektives Tagesjournal (RPE, Muskelkater, Energie), Garmins eigener Trainingsbereitschafts-Score mit verständlicher Einordnung ("Hauptgrund: Erholungszeit ist aktuell Schlecht"), Trainingslast-/Form-Kennzahlen (ACWR, CTL/ATL/TSB)
 - **📊 Health Trends**: fortlaufender Renn-/Workout-Kalender mit sportspezifischen Icons, Endurance-Score-Einordnung anhand von Garmins eigenen Klassifizierungs-Schwellenwerten, HRV/Ruhepuls-, Schlaf-, Gewichts- und Readiness-Trends
 - **🏃 Aktivitäten**: manueller Sync von Läufen/Rad/Schwimmen inkl. optionaler Sekunden-Detail-Zeitreihen (GPS/HF/Leistung), Filter, Detailcharts und GPS-Route
-- **🏗️ Workout Builder**: strukturierte Intervall-Lauf-Workouts (Warmup/Intervalle/Erholung/Cooldown) per Formular erstellen und direkt zu Garmin Connect hochladen, Pace-Ziele aus den aktuellen Trainingszonen
+- **🏗️ Workout Builder**: strukturierte Intervall-Lauf-Workouts (Warmup/Intervalle/Erholung/Cooldown) **oder** durchgehende Läufe (lockerer Dauerlauf/langer Lauf ohne Struktur) per Formular erstellen und direkt zu Garmin Connect hochladen, Pace-Ziele aus den aktuellen Trainingszonen. Vorbefüllbar aus einem Wochenplaner-Entwurf über `?draft_id=...`.
+- **📅 Rolling-Horizon-Wochenplaner**: generiert sonntags automatisch (im Anschluss an den täglichen Sync) einen Gemini-gestützten Plan für die **kommenden zwei Wochen** - pro Tag Sportart/Session-Typ/Zielzone/Dauer, unter Berücksichtigung von Trainingsphase, CTL/ATL/TSB-Trend, Übertrainings-Signal, festen Vereinsterminen (inkl. optionalem Charakter-Hinweis wie "Bahntraining: meist Intervalle") und Renn-Countdown. Wettkampftage bekommen nie ein Training vorgeschlagen. Baut für Lauf-Tage automatisch einen Workout-Entwurf - "Hochladen" lädt hoch **und** plant direkt im Garmin-Kalender ein, alternativ im Workout Builder anpassbar. Kalender-Widget in der Heute-Ansicht zeigt vier zunehmend gröbere Ebenen: diese Woche (konkret mit Workouts, inkl. Kalenderdatum pro Tag und KW in der Überschrift), nächste und übernächste Woche (beide nach denselben Regeln: nur kurze Tages-Andeutung mit Sportart als Emoji statt Wort, kein Gemini-Call, kompakt, ebenfalls mit Datum/KW - der konkrete Gemini-Plan für die nächste Woche wird trotzdem schon vorbereitet, taucht aber erst auf, sobald sie zu "diese Woche" wird) und ab Woche 4 ein Balken pro Woche bis einschließlich der Woche des nächsten Wettkampfs (KW, Datumsbereich, Trainingsphase - Taper/Peak sind reine Datums-Schwellenwerte und daher für die Zukunft berechenbar, Build/Base nicht, dort bleibt die Phase ehrlich leer; die letzte Zeile nennt stattdessen explizit Wettkampf-Titel und -Datum). Endet die Anzeige nach der übernächsten Woche, falls kein weiterer Wettkampf ansteht.
 - **💬 Chat** (Gemini, `chat_engine.py`): beantwortet Fragen zu den Trainingsdaten (Whitelist-SQL-Zugriff auf die regelbasierten Auswertungen) und kann Workouts vorschlagen/hochladen — Vorschlag und Upload sind strukturell auf zwei getrennte Nachrichten aufgeteilt, kein automatisches Verketten
 - **⚙️ Settings**: Einzel-Sync, Zeitraum-Backfill, Aktivitäten-Sync, Withings-Sync sowie eine API-Explorationsfunktion, die alle relevanten Garmin-Endpunkte einmal testweise abruft und die rohen JSON-Antworten anzeigt/speichert
 - **⚖️ Withings-Integration**: holt Waagen-Daten (Gewicht, Körperfett %, Muskelmasse, Wasseranteil, Knochenmasse, Fettmasse) direkt bei Withings statt über Garmins lückenhafte/teils fehlerhafte Weiterleitung (live bestätigt: falsche Gewichtseinheit an mehreren Tagen). Eigene OAuth2-Anbindung ohne SDK (Bibliothekskonflikt mit Gemini vermieden), fließt bevorzugt in die Gewichts-Baseline ein, Garmin bleibt Fallback für Tage ohne Withings-Daten.
@@ -116,17 +117,18 @@ training_zones.py            # Friel-Trainingszonen aus Schwellenwerten
 weekly_summary.py            # Regelbasierte Wochen-Kennzahlen
 insight_memory.py            # LLM-gestütztes Erkenntnis-Gedächtnis
 gemini_client.py             # Gemeinsame Gemini-Konfiguration
-workout_builder.py           # Erstellt/lädt strukturierte Garmin-Workouts
+workout_builder.py           # Erstellt/lädt strukturierte Garmin-Workouts (Intervall + durchgehend)
 chat_engine.py                # Schicht 4: Chat mit Function-Calling (Query-Tool, Workout-Vorschlag/-Upload)
-context_blocks.py             # Gemeinsame Gemini-Kontext-Bausteine (chat_engine.py + daily_recommendation.py)
-auto_sync.py                  # Automatischer Sync-Trigger via Schlafdaten-Checker (läuft im dashboard-v2-Container)
+context_blocks.py             # Gemeinsame Gemini-Kontext-Bausteine (chat_engine.py + daily_recommendation.py + weekly_planner.py)
+auto_sync.py                  # Automatischer Sync-Trigger via Schlafdaten-Checker + Sonntags-Wochenplaner-Trigger (läuft im dashboard-v2-Container)
 daily_recommendation.py       # Heute-Ansicht: Gemini-generierte Tagesempfehlung inkl. Override
+weekly_planner.py             # Rolling-Horizon-Wochenplaner: Signal-Sammlung, Gemini-Wochenplan, Workout-Entwürfe
 training_slots.py             # CRUD für wiederkehrende Vereins-Trainingstermine
 withings_auth.py              # Withings-OAuth2-Token-Caching (kein SDK, direkt per requests)
 withings_service.py           # Holt Withings-Waagen-Messwerte direkt (Körperfett/Muskelmasse/...)
 examples/                    # Eigenständige Nutzungsbeispiele (kein UI), z.B. für workout_builder.py/chat_engine.py/auto_sync.py/withings_authorize.py
 backend/                     # FastAPI-Rebuild (main.py, routers/, eigenes Dockerfile+requirements.txt)
-frontend/                    # React/TypeScript/Vite-Frontend (Heute-Ansicht, Vereins-Slot-Einstellungen)
+frontend/                    # React/TypeScript/Vite-Frontend (Heute-Ansicht, Kalender-Widget, Vereins-Slot-Einstellungen)
 ```
 
 Ein technischer Gesamtüberblick (Architektur, Konventionen, Datenbank-Kategorien) steht in
@@ -140,3 +142,4 @@ Ein technischer Gesamtüberblick (Architektur, Konventionen, Datenbank-Kategorie
 - Der `dashboard-v2`-Container (FastAPI+React) teilt sich die SQLite-Datei mit dem Streamlit-Container über ein gemeinsames `./data`-Volume-Mount, nicht das ganze Repo. Seit dem automatischen Sync-Trigger schreibt er auch (ein voller Sync pro Tag) — bislang unkritisch beobachtet, bei künftigen Problemen wäre SQLites WAL-Modus die Standardlösung.
 - `dashboard` und `dashboard-v2` teilen sich außerdem den Garmin-Session-Token-Cache über `./garmin_tokens:/root/.garminconnect`, damit der automatische Sync-Trigger keinen eigenen, zweiten Passwort-Login braucht.
 - Withings-Tokens liegen unter `./withings_tokens:/root/.withings_api` (nur im `dashboard`-Service gemountet, da der Withings-Sync aktuell nur dort läuft) und sind wie `garmin_tokens/` bewusst in `.gitignore`/`.dockerignore`.
+- Der Wochenplaner läuft automatisch sonntags im `dashboard-v2`-Container (siehe `auto_sync.py`) - kein manueller Anstoß nötig, aber bei Bedarf lazy über `GET /api/weekly-plan/{date}` nachgenerierbar. Workout-Entwürfe werden gebaut, aber **nicht automatisch hochgeladen** - das passiert erst über den "Hochladen"-Button im Kalender-Widget.

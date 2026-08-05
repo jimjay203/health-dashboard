@@ -258,6 +258,145 @@ durchreicht).
 - **Sync-Trigger:** bewusst erstmal nur ein manueller Button in den Streamlit-Settings (wie der
   Aktivitäten-Sync) - noch nicht Teil des täglichen `auto_sync.py`-Loops.
 
+## Rolling-Horizon-Wochenplaner (`weekly_planner.py`)
+
+Löst die frühere offene Design-Frage "wie kommt man von Trainingsphase/CTL-ATL-TSB/Erkenntnis-
+Gedächtnis zu konkreten Wocheninhalten". Läuft **sonntags**, nachdem der tägliche Auto-Sync
+erfolgreich war (siehe `auto_sync.py`-Abschnitt oben), generiert für die **kommenden zwei Wochen**
+(Mo-So, jeweils zwei Sonntage im Voraus - siehe Sonntags-Trigger unten) pro Tag einen Vorschlag
+inkl. Workout-Entwürfen für Lauf-Tage. Nutzt bewusst nur real vorhandene Signale
+(`daily_summary.overreach_flag` statt eines noch nicht gebauten Frühwarnsystems, keine
+Ziel-Intensitätsverteilung) - Signal-Sammlung ist klar von der Gemini-Aufruf-Logik getrennt, damit
+sich weitere Signale später nachrüsten lassen.
+
+**Vier Kalender-Ebenen** im Frontend (`WeeklyCalendarWidget.tsx`), zunehmend gröber je weiter in
+der Zukunft: **Diese Woche** (konkret, mit Workout-Entwürfen, Gemini-generiert), **Nächste Woche**
+und **Übernächste Woche** (beide nach denselben Regeln: nur eine kurze Tages-Andeutung je Sportart
+als Emoji statt Wort - bewusst kompakt, keine Workout-Details, kein Gemini-Call - siehe
+`get_week_outlook()` unten), **ab Woche 4** (ein Balken pro Woche bis einschließlich der Woche des
+nächsten Rennens, die letzte Zeile benennt Wettkampf + Datum statt nur der Trainingsphase - siehe
+`get_far_weeks_outlook()` unten). Jeder Tag zeigt zusätzlich sein Kalenderdatum, jede
+Wochen-Überschrift die ISO-Kalenderwoche (KW) + Datumsbereich (`formatShortDate()` in `api.ts` -
+reines String-Slicing auf dem bereits bekannten ISO-Datum, kein `new Date(isoString)`, siehe
+Datums-Konvention weiter unten).
+
+- **Nächste Woche zeigt bewusst keinen konkreten Plan mehr** (frühere Version tat das) - der
+  konkrete Gemini-Plan inkl. Workout-Entwürfen wird trotzdem weiterhin vom Sonntags-Trigger zwei
+  Sonntage im Voraus vorbereitet (siehe unten), nur eben erst angezeigt/nutzbar, sobald diese Woche
+  zu "Diese Woche" wird - dadurch ist der Plan am Montagmorgen sofort da, ohne Lazy-Generierung
+  live im Request. Die frühzeitige Generierung ist also weiterhin sinnvoll, obwohl sie nicht mehr
+  zwei Wochen im Voraus sichtbar ist.
+
+- **Ground-Truth-Fund:** `weekly_summary` wird ausschließlich rückwirkend befüllt (ein
+  Wochen-Eintrag entsteht erst, sobald mind. ein Tag dieser Woche synchronisiert wurde) - für die
+  kommende Woche existiert beim Sonntags-Lauf noch kein Eintrag. Der Planer liest deshalb die
+  **zuletzt abgeschlossene** Woche (Ist-Zustand) und überlässt die Projektion "welche Phase
+  sollte die kommende Woche haben" dem Gemini-Kontext (Renn-Countdown + CTL/ATL/TSB-Trend) -
+  keine erfundene "Phase der kommenden Woche".
+- **Signal-Sammlung** (`_gather_weekly_context`): zuletzt abgeschlossene `weekly_summary`,
+  14-Tage-CTL/ATL/TSB-Trend, aktuellstes `overreach_flag`, feste Club-Slots der kommenden Woche
+  (inkl. optionalem `typical_character`-Freitext, siehe unten), `insight_memory_block()` aus
+  `context_blocks.py` (wiederverwendet, nicht dupliziert), Renn-Countdown. **Compliance-Vergleich
+  Vorwoche** (geplant aus `weekly_plan` vs. tatsächlich aus `garmin_activities`) wird bei
+  fehlendem Vorwochen-Plan bewusst ausgelassen (kein Nullen-Fallback) - z.B. beim allerersten Lauf.
+- **Club-Slot-Tage sind nicht ausgeschlossen:** Sportart und "dass überhaupt eine Einheit
+  stattfindet" sind fix (`is_club_slot=1`), Session-Typ/Fokus bestimmt das Modell trotzdem selbst,
+  passend zum `typical_character`-Hinweis (z.B. "Bahntraining: meist Intervalle") UND zum
+  aktuellen Kontext (z.B. in einer Taper-Woche trotz Bahntraining nur eine kurze
+  Aktivierungseinheit) - exakt das Prinzip aus `daily_recommendation.py`, nur eine Woche im
+  Voraus. `club_training_slots` hat dafür eine neue optionale `typical_character`-Spalte
+  (Settings-UI in `ClubSlotsSettings.tsx` entsprechend ergänzt).
+- **Antwort-Validierung, zwei live gefundene Lücken behoben:** das Modell gab anfangs
+  `target_zone="Z4-Z5"` (Bereich mit "Z"-Präfix, passt nicht zu `training_zones_running.zone`)
+  und `sport_type="Radfahren"` (Synonym statt der festen `SPORT_TYPES`-Werte) zurück - beide
+  Werte werden im System-Prompt jetzt explizit auf die exakte, in der App verwendete
+  Werteliste beschränkt.
+- **Wettkampftage bekommen nie ein Training vorgeschlagen** (`_race_days_for`/Override in
+  `generate_weekly_plan`) - **Code-Garantie, nicht nur Prompt-Anweisung**: unabhängig davon, was
+  das Modell für einen Renntag zurückgibt, wird die Zeile programmatisch auf `sport_type=None`,
+  `session_type="Wettkampf: <Titel>"`, `source="race"` überschrieben (dadurch automatisch auch
+  kein Workout-Entwurf, da `_build_workout_drafts` nur bei `sport_type="Laufen"` baut). Der
+  Renntag wird dem Modell trotzdem im Kontext genannt, damit die umliegenden Tage (Taper davor,
+  Regeneration danach) sinnvoll mitgeplant werden. Live am echten Renntermin (14. GEWOBA City
+  Triathlon, 09.08.2026) verifiziert.
+- **Workout-Entwürfe** (`weekly_plan_workout_draft`, nur für `sport_type="Laufen"` - siehe
+  Sport-Abdeckung von `workout_builder.py` unten): einfache Stichwort-Heuristik
+  (intervall/tempo/schwellen/wiederholung im `session_type`-Text) entscheidet zwischen
+  `build_interval_running_workout()` (feste, sinnvolle Default-Struktur: 5x1000m, der Wochenplan
+  liefert nur ein Gesamt-Zielvolumen, keine Intervall-Feinstruktur) und der neuen
+  `build_steady_running_workout()` (ein einzelner Schritt ohne Warmup/Cooldown - es gab dafür
+  bisher **keine** Funktion in `workout_builder.py`, nur Templates mit erzwungenem
+  Warmup+Intervalle+Cooldown; die meisten Lauf-Tage sind aber lockere Dauerläufe, keine
+  Intervalle). **Speichert bewusst nicht das gebaute Workout-Objekt**, sondern
+  `builder_name`+`builder_params_json` - wird bei Upload/Vorbefüllung frisch neu gebaut
+  (robuster als Objekt-Serialisierung, dieselben Parameter dienen direkt als Formular-Vorbefüllung).
+  Rad/Schwimm/Krafttraining/Mobility/Ruhetage bekommen bewusst keinen Entwurf (kein
+  Support in `workout_builder.py`).
+- **Sonntags-Trigger, deckt zwei Wochen ab:** kein neuer Scheduler -
+  `auto_sync.py::run_daily_auto_sync_forever()` bekommt nach einem erfolgreichen Tages-Sync eine
+  zusätzliche Sonntags-Prüfung (`_maybe_run_weekly_planner`), die **beide** anstehenden Wochen
+  (kommende + übernächste) prüft/generiert. Idempotenz-Check pro Woche direkt gegen `weekly_plan`
+  selbst (kein zusätzliches Tracking nötig) - dadurch bekommt jede Woche genau einmal einen Plan,
+  zwei Sonntage vor ihrem Montag, statt kurz davor noch einmal überschrieben zu werden (würde
+  sonst bereits hochgeladene/angepasste Entwürfe verwerfen). Best effort wie der bestehende
+  `recommendation_fn`-Aufruf.
+- **`pages/6_🏗️_Workout_Builder.py` erweitert:** unterstützte bisher nur Intervall-Workouts -
+  jetzt zusätzlich ein "Durchgehend"-Modus (`build_steady_running_workout`). Liest
+  `st.query_params.get("draft_id")` für die Vorbefüllung aus einem Wochenplaner-Entwurf.
+  **Wichtiger Architektur-Fund:** React-Frontend (Port 8000) und Streamlit (Port 8501) sind
+  komplett getrennte Prozesse - `st.session_state` kann nicht zwischen ihnen geteilt werden.
+  "Workout anpassen" im Kalender-Widget ist deshalb ein einfacher Link zu
+  `http://<host>:8501/Workout_Builder?draft_id=<id>` (volle Browser-Navigation), keine
+  API-Vermittlung nötig. Nach Upload über diesen Weg wird der Entwurf als hochgeladen markiert,
+  damit das Kalender-Widget den Status korrekt zeigt.
+- **"Hochladen" plant auch gleich in den Garmin-Kalender ein:** `POST /api/workout-draft/
+  {id}/upload` ruft `upload_workout(workout, client, schedule_date=<Entwurfsdatum>)` auf (vorher
+  ohne `schedule_date` - nur Upload ohne Termin). Reine Logik-Änderung, der Button heißt weiterhin
+  "Hochladen".
+- **`backend/routers/weekly_plan.py`**: `GET /api/weekly-plan/{date}` (Cache-dann-Lazy-Generieren,
+  gleiches Muster wie `GET /api/daily-recommendation/{date}` - bedient nur noch "Diese Woche"),
+  `GET /api/week-outlook/{date}` (bedient sowohl "Nächste Woche" als auch "Übernächste Woche" -
+  beide nach denselben Regeln, ruft `weekly_planner.py::get_week_outlook()` auf - **kein
+  Gemini-Call**: Club-Slot-Tage nutzen die feste Sportart + einen kurzen `typical_character`-
+  Auszug, freie Tage nutzen das häufigste eigene Muster dieses Wochentags aus der `weekly_plan`-
+  Historie, ehrlicher als eine frisch spekulierende Modell-Antwort für einen so unsicheren
+  Horizont), `GET /api/workout-draft/{date}`, `POST /api/workout-draft/{draft_id}/upload`,
+  `GET /api/training-outlook` (aktuellste `weekly_summary.training_phase` +
+  `days_until_next_race` - liefert die Trainingsphase, die als Zusatz-Hinweis in den
+  Überschriften von Woche 1-3 angezeigt wird; "nächster Wettkampf" ist bewusst einfach das
+  nächste Rennen aus `garmin_scheduled_events`, Garmin liefert keine A/B/C-Priorität, siehe
+  dortiger Schema-Check), `GET /api/far-weeks-outlook/{date}` (ab Woche 4, siehe
+  `get_far_weeks_outlook()` unten - `week_id`/`week_start`/`week_end`/`weekly-plan`- und
+  `week-outlook`-Response bekamen dafür ebenfalls ein `week_id`-Feld auf oberster Ebene, per
+  `d.isocalendar()`).
+- **`get_far_weeks_outlook(reference_date)`** (neu in `weekly_planner.py`): iteriert wochenweise
+  von Woche 4 (3 Wochen nach der Woche von `reference_date`) bis zur Woche des nächsten Rennens ab
+  diesem Punkt (`garmin_scheduled_events.event_date >= week4_start`, `ORDER BY event_date ASC LIMIT
+  1`) - gibt `[]` zurück, falls kein solches Rennen existiert (dann endet die Anzeige nach
+  "Übernächste Woche", wie vom Nutzer vorgegeben). **Trainingsphase pro Woche ist bewusst nur
+  teilweise berechnet:** Taper (`days_until_race <= TAPER_DAYS_THRESHOLD`) und Peak (`<=
+  PEAK_DAYS_THRESHOLD`) sind in `weekly_summary.py::_training_phase` reine Datums-Schwellenwerte
+  und daher sicher auf beliebige zukünftige Wochen projizierbar (Konstanten von dort importiert,
+  nicht dupliziert); Build/Base hängen dagegen von echtem synchronisiertem Trainingsvolumen der
+  jeweiligen Woche ab, das für die Zukunft nicht existiert - für Wochen jenseits des
+  Peak-Schwellenwerts bleibt `training_phase` deshalb bewusst `None` (Frontend zeigt "–") statt
+  eine Phase zu erfinden. Die letzte Woche (die des Rennens selbst) bekommt zusätzlich
+  `race_title`/`race_date` gesetzt (sonst `None`) - dort wird der Wettkampf inkl. genauem Datum
+  explizit benannt statt nur Trainingsphase/Datumsbereich zu zeigen, wie vom Nutzer gewünscht.
+  Live gegen echte Daten verifiziert (Stand 05.08.2026): die Liste reicht bis KW 37
+  (07.-13.09.2026), der Woche des SWB Marathon Bremen am 13.09.2026, letzter Balken zeigt
+  "swb-Marathon Bremen (13.09.)" statt einer Trainingsphase - exakt wie erwartet.
+- **Frontend:** `WeeklyCalendarWidget.tsx` ersetzt die bisherigen `TomorrowCard`/`WeekStripView`-
+  Sektionen in `TodayView.tsx` durch die vier oben beschriebenen Ebenen. "Nächste Woche" und
+  "Übernächste Woche" zeigen die Sportart als Emoji statt als Wort (`outlookIcon()`) und nur einen
+  kurzen Zusatz-Text ohne die Sportart-Wiederholung (`outlookDetail()` - schneidet das äußere
+  Klammernpaar aus dem vom Backend gelieferten `hint`-Text, robust auch bei verschachtelten Klammern
+  im `session_hint`, z.B. "Langer Lauf (Marathon-Vorbereitung)"), bewusst kompakteres Padding als
+  die "Diese Woche"-Karte. `daily_recommendation.py::_gather_context` bekommt einen neuen
+  `weekly_plan_block`-Baustein (in `context_blocks.py`, geteilt) - prüft zuerst, ob heute ein
+  Club-Slot ist (dann kein zusätzlicher Wochenplan-Kontext nötig), sonst der generierte
+  Wochenplan-Vorschlag für heute.
+
 ## Die vier "Schichten" der KI-Chat-Vorbereitung
 
 Aufbauender Kontext für den Chat (Schicht 4, siehe eigener Abschnitt unten):
@@ -383,10 +522,11 @@ zeigt `tool_calls_json` je Antwort in einem Debug-Expander). CLI-Alternative: `e
 | `weekly_summary.py` | Schicht 2, pro-Woche-Kennzahlen |
 | `insight_memory.py` | Schicht 3, nutzergeschriebenes Erkenntnis-Gedächtnis |
 | `gemini_client.py` | Gemeinsame Gemini-Konfiguration (Key/Modell/Client) |
-| `workout_builder.py` | Erstellt/lädt strukturierte Garmin-Workouts (Pace-/Zonen-Ziele) |
+| `workout_builder.py` | Erstellt/lädt strukturierte Garmin-Workouts (Pace-/Zonen-Ziele, Intervall + durchgehend) |
+| `weekly_planner.py` | Rolling-Horizon-Wochenplaner: Signal-Sammlung, Gemini-Wochenplan, Workout-Entwürfe |
 | `chat_engine.py` | Schicht 4: `ChatEngine` mit Function-Calling (Query-Tool, Workout-Vorschlag/-Upload) |
 | `auto_sync.py` | Automatischer Sync-Trigger: leichtgewichtiger Schlafdaten-Checker + Tages-Loop, löst `fetch_and_store_garmin_data()` und `generate_daily_recommendation()` aus |
-| `context_blocks.py` | Wiederverwendbare Gemini-Kontext-Bausteine, geteilt von chat_engine.py und daily_recommendation.py |
+| `context_blocks.py` | Wiederverwendbare Gemini-Kontext-Bausteine (u.a. `strip_markdown_fences`), geteilt von chat_engine.py/daily_recommendation.py/weekly_planner.py |
 | `daily_recommendation.py` | Heute-Ansicht: Gemini-generierte Tagesempfehlung inkl. Override-Regenerierung |
 | `training_slots.py` | CRUD für wiederkehrende Vereins-Trainingstermine (club_training_slots) |
 | `withings_auth.py` | Withings-OAuth2-Token-Caching per requests (kein SDK, siehe Ground-Truth-Fund oben) |
@@ -408,8 +548,10 @@ zeigt `tool_calls_json` je Antwort in einem Debug-Expander). CLI-Alternative: `e
 | `backend/routers/sync_status.py` | `GET /api/sync-status`, `POST /api/sync-trigger` (siehe auto_sync.py) |
 | `backend/routers/today.py` | Heute-Ansicht: readiness/trends/daily-recommendation/daily-override/week-strip (5 Endpoints) |
 | `backend/routers/club_slots.py` | CRUD auf /api/club-slots (siehe training_slots.py) |
+| `backend/routers/weekly_plan.py` | Wochenplaner-Endpoints: weekly-plan/week-outlook/workout-draft/training-outlook/far-weeks-outlook (siehe weekly_planner.py) |
 | `frontend/src/App.tsx` | Ansichtsumschalter (Heute/Einstellungen), kein Routing |
-| `frontend/src/TodayView.tsx` | Heute-Ansicht: Readiness-Dial, Empfehlungs-Panel, Metrik-Kacheln, Wochenstreifen |
+| `frontend/src/TodayView.tsx` | Heute-Ansicht: Readiness-Dial, Empfehlungs-Panel, Metrik-Kacheln, Kalender-Widget |
+| `frontend/src/WeeklyCalendarWidget.tsx` | Rolling-Horizon-Kalender: Diese Woche/Nächste Woche/Wochen 3-4 |
 | `frontend/src/ClubSlotsSettings.tsx` | Einfache Liste + Formular für Vereins-Trainingstermine |
 | `frontend/src/api.ts` | Typisierte fetch()-Wrapper für alle Backend-Endpoints |
 
@@ -430,7 +572,11 @@ zeigt `tool_calls_json` je Antwort in einem Debug-Expander). CLI-Alternative: `e
   (subjektive Nutzereingaben, PK `date`), `chat_history` (Schicht-4-Konversation, append-only)
 - **Auto-Sync:** `auto_sync_status` (PK `date`, siehe `auto_sync.py`-Abschnitt oben)
 - **Heute-Ansicht:** `daily_recommendation`/`daily_override` (PK `date`), `club_training_slots`
-  (PK `id` AUTOINCREMENT, siehe "Heute-Ansicht"-Abschnitt oben)
+  (PK `id` AUTOINCREMENT, mit optionaler `typical_character`-Spalte, siehe "Heute-Ansicht"- bzw.
+  "Rolling-Horizon-Wochenplaner"-Abschnitt oben)
+- **Wochenplaner:** `weekly_plan` (PK `date`, eine Zeile pro Tag statt pro Woche - siehe
+  Begründung im "Rolling-Horizon-Wochenplaner"-Abschnitt oben), `weekly_plan_workout_draft`
+  (PK `id` AUTOINCREMENT, speichert Builder-Name+Parameter statt eines Workout-Objekts)
 
 ## Wichtige Konventionen
 
@@ -463,4 +609,13 @@ zeigt `tool_calls_json` je Antwort in einem Debug-Expander). CLI-Alternative: `e
 - Die Heute-Ansicht wurde nicht in einem echten Browser visuell getestet (kein
   Browser-Automatisierungswerkzeug in dieser Session verfügbar) - nur indirekt über
   API-Response-Form vs. TypeScript-Interfaces, erfolgreichen Docker-Frontend-Build und
-  Asset-Abruf bestätigt. Manueller Blick ins Frontend unter localhost:8000 steht noch aus.
+  Asset-Abruf bestätigt. Manueller Blick ins Frontend unter localhost:8000 steht noch aus. Gilt
+  auch für das neue Kalender-Widget.
+- `POST /api/workout-draft/{id}/upload` (lädt hoch UND plant jetzt auch für den Entwurfstag im
+  Garmin-Kalender ein) wurde strukturell (404-Fall, Docker-Build) geprüft, aber noch nicht gegen
+  einen echten Garmin-Upload getestet - bewusst zurückgehalten (429-Vorsicht), steht mit dem
+  Nutzer zusammen noch aus.
+- Die Intervall-Workout-Entwürfe des Wochenplaners nutzen eine feste Default-Struktur (5x1000m,
+  10min Warmup/Cooldown Zone 1, 2min Erholung) statt einer vom Modell vorgeschlagenen
+  Feinstruktur (`weekly_plan` speichert nur ein Gesamt-Zielvolumen, keine Intervall-Details) -
+  der Entwurf ist als Ausgangspunkt für "Workout anpassen" gedacht, keine Endfassung.

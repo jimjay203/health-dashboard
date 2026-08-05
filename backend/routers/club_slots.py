@@ -23,6 +23,9 @@ class ClubSlotIn(BaseModel):
     label: str
     valid_from: str
     valid_to: str | None = None
+    # Freitext fürs Wochenplaner-Modell (siehe weekly_planner.py) - was an diesem Slot realistisch
+    # möglich ist, z.B. "Bahntraining: meist Intervalle, 400-1000m Wiederholungen". Optional.
+    typical_character: str | None = None
 
 
 class ClubSlotResponse(ClubSlotIn):

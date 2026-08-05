@@ -295,6 +295,27 @@ def init_db():
             override_value TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         """,
+        # Rolling-Horizon-Wochenplaner (siehe weekly_planner.py) - PK date statt week_id, da
+        # Heute-Ansicht/daily_recommendation.py immer "was ist heute geplant" abfragen (ein
+        # SELECT...WHERE date=? statt Wochen-Lookup+Tag-Extraktion). week_id bleibt als Spalte für
+        # wochenweite Operationen (Compliance-Vergleich, "ganze Woche neu generieren").
+        # week_rationale_text ist auf allen 7 Zeilen einer Woche identisch (Redundanz akzeptiert,
+        # vermeidet eine zweite Wochen-Tabelle für einen einzelnen Text).
+        "weekly_plan": """
+            date TEXT PRIMARY KEY,
+            week_id TEXT,
+            weekday INTEGER,
+            sport_type TEXT,
+            session_type TEXT,
+            target_zone TEXT,
+            target_duration_minutes REAL,
+            target_distance_m REAL,
+            is_club_slot INTEGER,
+            source TEXT,
+            week_rationale_text TEXT,
+            data_quality_flag TEXT,
+            generated_at TIMESTAMP
+        """,
     }
     for table_name, columns_sql in daily_tables.items():
         cursor.execute(f"CREATE TABLE IF NOT EXISTS {table_name} ({columns_sql})")
@@ -754,6 +775,30 @@ def init_db():
         valid_to TEXT
     )
     """)
+    existing_columns = {row[1] for row in cursor.execute("PRAGMA table_info(club_training_slots)")}
+    if "typical_character" not in existing_columns:
+        # Freitext für den Wochenplaner (siehe weekly_planner.py) - was an diesem Slot realistisch
+        # möglich ist (z.B. "Bahntraining: meist Intervalle, 400-1000m Wiederholungen"). Optional,
+        # leer lassen ist erlaubt.
+        cursor.execute("ALTER TABLE club_training_slots ADD COLUMN typical_character TEXT")
+
+    # Workout-Entwürfe des Wochenplaners (siehe weekly_planner.py) - ein Tag kann keinen, einen
+    # Entwurf haben (nur bei sport_type="Laufen", siehe dortige Sport-Abdeckungs-Einschränkung).
+    # Speichert bewusst NICHT das gebaute Workout-Objekt, sondern Builder-Name + Parameter - wird
+    # bei Bedarf (Upload / Vorbefüllung in pages/6_🏗️_Workout_Builder.py) frisch neu gebaut,
+    # robuster als Objekt-Serialisierung und dieselben Parameter dienen direkt als Formular-Default.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS weekly_plan_workout_draft (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL,
+        builder_name TEXT NOT NULL,
+        builder_params_json TEXT NOT NULL,
+        uploaded_at TIMESTAMP
+    )
+    """)
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_weekly_plan_workout_draft_date ON weekly_plan_workout_draft(date)"
+    )
 
     # Withings-Waagen-Daten (siehe withings_service.py) - direkt bei Withings statt über Garmins
     # lückenhafte Weiterleitung abgeholt. Eigene Tabelle statt Wiederverwendung von

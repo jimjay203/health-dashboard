@@ -18,6 +18,7 @@ from garminconnect import GarminConnectTooManyRequestsError
 from garmin_auth import get_garmin_client
 from garmin_service import fetch_and_store_garmin_data
 from daily_recommendation import generate_daily_recommendation
+from weekly_planner import generate_weekly_plan, get_week_plan
 from db import get_connection, upsert_daily_metric
 
 AUTO_SYNC_START_TIME = dt_time(6, 0)
@@ -177,10 +178,36 @@ async def run_auto_sync_loop(
     return "gave_up"
 
 
+async def _maybe_run_weekly_planner(weekly_planner_fn, now_fn):
+    """Sonntags, nach erfolgreichem Tages-Sync, den Wochenplaner für die kommende UND die
+    übernächste Woche anstoßen (siehe weekly_planner.py) - zwei konkrete, mit Workouts
+    durchgeplante Wochen sollen jederzeit sichtbar sein. Kein neuer Scheduler, hängt direkt an der
+    bestehenden Tages-Schleife in run_daily_auto_sync_forever(). Idempotenz-Check pro Woche direkt
+    gegen weekly_plan selbst (kein zusätzliches Tracking nötig) - dadurch bekommt jede Woche genau
+    einmal einen Plan, zwei Sonntage vor ihrem Montag (als "übernächste" Woche), nicht noch einmal
+    kurz davor überschrieben (würde sonst bereits hochgeladene/angepasste Entwürfe verwerfen).
+    Best effort: ein Fehler hier darf den bereits erfolgreichen Tages-Sync-Status nicht kippen,
+    wird nur geloggt."""
+    now = now_fn()
+    if now.date().isoweekday() != 7:  # nur sonntags (1=Montag..7=Sonntag)
+        return
+    next_monday = now.date() + timedelta(days=1)
+    for target_monday in (next_monday, next_monday + timedelta(days=7)):
+        target_date = target_monday.isoformat()
+        try:
+            already_planned = await asyncio.to_thread(get_week_plan, target_date)
+            if already_planned:
+                continue
+            await asyncio.to_thread(weekly_planner_fn, target_date)
+        except Exception as e:
+            print(f"⚠️  auto_sync: Wochenplanung für {target_date} fehlgeschlagen: {e}")
+
+
 async def run_daily_auto_sync_forever(
     start_time=AUTO_SYNC_START_TIME,
     cutoff_time=AUTO_SYNC_CUTOFF_TIME,
     interval_seconds=AUTO_SYNC_CHECK_INTERVAL_SECONDS,
+    weekly_planner_fn=generate_weekly_plan,
     now_fn=datetime.now,
 ):
     """Dauerlauf-Wrapper um run_auto_sync_loop() - läuft, solange der FastAPI-Prozess lebt (siehe
@@ -189,10 +216,12 @@ async def run_daily_auto_sync_forever(
     durch, restart: unless-stopped)."""
     while True:
         try:
-            await run_auto_sync_loop(
+            status = await run_auto_sync_loop(
                 start_time=start_time, cutoff_time=cutoff_time,
                 interval_seconds=interval_seconds, now_fn=now_fn,
             )
+            if status == "completed":
+                await _maybe_run_weekly_planner(weekly_planner_fn, now_fn)
         except Exception as e:
             print(f"⚠️  auto_sync: unerwarteter Fehler in der Tages-Schleife: {e}")
 

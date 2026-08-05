@@ -16,30 +16,30 @@ def list_slots():
     return [dict(r) for r in rows]
 
 
-def create_slot(weekday, sport_type, label, valid_from, valid_to=None):
+def create_slot(weekday, sport_type, label, valid_from, valid_to=None, typical_character=None):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO club_training_slots (weekday, sport_type, label, valid_from, valid_to) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (weekday, sport_type, label, valid_from, valid_to)
+        "INSERT INTO club_training_slots (weekday, sport_type, label, valid_from, valid_to, "
+        "typical_character) VALUES (?, ?, ?, ?, ?, ?)",
+        (weekday, sport_type, label, valid_from, valid_to, typical_character)
     )
     new_id = cursor.lastrowid
     conn.commit()
     conn.close()
     return {
         "id": new_id, "weekday": weekday, "sport_type": sport_type, "label": label,
-        "valid_from": valid_from, "valid_to": valid_to,
+        "valid_from": valid_from, "valid_to": valid_to, "typical_character": typical_character,
     }
 
 
-def update_slot(slot_id, weekday, sport_type, label, valid_from, valid_to=None):
+def update_slot(slot_id, weekday, sport_type, label, valid_from, valid_to=None, typical_character=None):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "UPDATE club_training_slots SET weekday=?, sport_type=?, label=?, valid_from=?, valid_to=? "
-        "WHERE id=?",
-        (weekday, sport_type, label, valid_from, valid_to, slot_id)
+        "UPDATE club_training_slots SET weekday=?, sport_type=?, label=?, valid_from=?, valid_to=?, "
+        "typical_character=? WHERE id=?",
+        (weekday, sport_type, label, valid_from, valid_to, typical_character, slot_id)
     )
     changed = cursor.rowcount
     conn.commit()
@@ -48,7 +48,7 @@ def update_slot(slot_id, weekday, sport_type, label, valid_from, valid_to=None):
         return None
     return {
         "id": slot_id, "weekday": weekday, "sport_type": sport_type, "label": label,
-        "valid_from": valid_from, "valid_to": valid_to,
+        "valid_from": valid_from, "valid_to": valid_to, "typical_character": typical_character,
     }
 
 

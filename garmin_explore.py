@@ -21,38 +21,38 @@ def _build_calls():
     week_start_str = week_start.isoformat()
 
     return [
-        # # --- Daily Health & Activity ---
-        # ("get_stats", lambda c: c.get_stats(today_str)),
-        # ("get_steps_data", lambda c: c.get_steps_data(today_str)),
-        # ("get_heart_rates", lambda c: c.get_heart_rates(today_str)),
-        # ("get_resting_heart_rate", lambda c: c.get_resting_heart_rate(today_str)),
-        # ("get_sleep_data", lambda c: c.get_sleep_data(today_str)),
-        # ("get_all_day_stress", lambda c: c.get_all_day_stress(today_str)),
-        # ("get_lifestyle_logging_data", lambda c: c.get_lifestyle_logging_data(today_str)),
+        # --- Daily Health & Activity ---
+        ("get_stats", lambda c: c.get_stats(today_str)),
+        ("get_steps_data", lambda c: c.get_steps_data(today_str)),
+        ("get_heart_rates", lambda c: c.get_heart_rates(today_str)),
+        ("get_resting_heart_rate", lambda c: c.get_resting_heart_rate(today_str)),
+        ("get_sleep_data", lambda c: c.get_sleep_data(today_str)),
+        ("get_all_day_stress", lambda c: c.get_all_day_stress(today_str)),
+        ("get_lifestyle_logging_data", lambda c: c.get_lifestyle_logging_data(today_str)),
 
-        # # --- Advanced Health Metrics ---
-        # ("get_training_readiness", lambda c: c.get_training_readiness(today_str)),
-        # ("get_morning_training_readiness", lambda c: c.get_morning_training_readiness(today_str)),
-        # ("get_training_status", lambda c: c.get_training_status(today_str)),
-        # ("get_respiration_data", lambda c: c.get_respiration_data(today_str)),
-        # ("get_spo2_data", lambda c: c.get_spo2_data(today_str)),
-        # ("get_max_metrics", lambda c: c.get_max_metrics(today_str)),
-        # ("get_hrv_data", lambda c: c.get_hrv_data(today_str)),
-        # ("get_fitnessage_data", lambda c: c.get_fitnessage_data(today_str)),
-        # ("get_stress_data", lambda c: c.get_stress_data(today_str)),
-        # ("get_lactate_threshold", lambda c: c.get_lactate_threshold(latest=True)),
-        # ("get_intensity_minutes_data", lambda c: c.get_intensity_minutes_data(today_str)),
-        # ("get_running_tolerance", lambda c: c.get_running_tolerance(week_start_str, today_str)),
+        # --- Advanced Health Metrics ---
+        ("get_training_readiness", lambda c: c.get_training_readiness(today_str)),
+        ("get_morning_training_readiness", lambda c: c.get_morning_training_readiness(today_str)),
+        ("get_training_status", lambda c: c.get_training_status(today_str)),
+        ("get_respiration_data", lambda c: c.get_respiration_data(today_str)),
+        ("get_spo2_data", lambda c: c.get_spo2_data(today_str)),
+        ("get_max_metrics", lambda c: c.get_max_metrics(today_str)),
+        ("get_hrv_data", lambda c: c.get_hrv_data(today_str)),
+        ("get_fitnessage_data", lambda c: c.get_fitnessage_data(today_str)),
+        ("get_stress_data", lambda c: c.get_stress_data(today_str)),
+        ("get_lactate_threshold", lambda c: c.get_lactate_threshold(latest=True)),
+        ("get_intensity_minutes_data", lambda c: c.get_intensity_minutes_data(today_str)),
+        ("get_running_tolerance", lambda c: c.get_running_tolerance(week_start_str, today_str)),
 
-        # # --- Historical Data & Trends ---
-        # ("get_body_battery", lambda c: c.get_body_battery(week_start_str, today_str)),
-        # ("get_floors", lambda c: c.get_floors(today_str)),
-        # ("get_blood_pressure", lambda c: c.get_blood_pressure(week_start_str, today_str)),
-        # ("get_body_battery_events", lambda c: c.get_body_battery_events(today_str)),
+        # --- Historical Data & Trends ---
+        ("get_body_battery", lambda c: c.get_body_battery(week_start_str, today_str)),
+        ("get_floors", lambda c: c.get_floors(today_str)),
+        ("get_blood_pressure", lambda c: c.get_blood_pressure(week_start_str, today_str)),
+        ("get_body_battery_events", lambda c: c.get_body_battery_events(today_str)),
 
-        # # --- Body Composition & Weight ---
-        # ("get_body_composition", lambda c: c.get_body_composition(today_str)),
-        # ("get_weigh_ins", lambda c: c.get_weigh_ins(week_start_str, today_str)),
+        # --- Body Composition & Weight ---
+        ("get_body_composition", lambda c: c.get_body_composition(today_str)),
+        ("get_weigh_ins", lambda c: c.get_weigh_ins(week_start_str, today_str)),
 
         # --- Goals & Achievements ---
         ("get_race_predictions", lambda c: c.get_race_predictions()),
@@ -63,13 +63,13 @@ def _build_calls():
         ("get_future_goals", lambda c: c.get_goals(status="future")),
         ("get_scheduled_workouts", lambda c: c.get_scheduled_workouts(2026, 9)),
 
-        # # --- Hydration & Wellness ---
-        # ("get_hydration_data", lambda c: c.get_hydration_data(today_str)),
-        # ("get_pregnancy_summary", lambda c: c.get_pregnancy_summary()),
-        # ("get_all_day_events", lambda c: c.get_all_day_events(today_str)),
-        # ("get_nutrition_daily_food_log", lambda c: c.get_nutrition_daily_food_log(today_str)),
-        # ("get_nutrition_daily_meals", lambda c: c.get_nutrition_daily_meals(today_str)),
-        # ("get_nutrition_daily_settings", lambda c: c.get_nutrition_daily_settings(today_str)),
+        # --- Hydration & Wellness ---
+        ("get_hydration_data", lambda c: c.get_hydration_data(today_str)),
+        ("get_pregnancy_summary", lambda c: c.get_pregnancy_summary()),
+        ("get_all_day_events", lambda c: c.get_all_day_events(today_str)),
+        ("get_nutrition_daily_food_log", lambda c: c.get_nutrition_daily_food_log(today_str)),
+        ("get_nutrition_daily_meals", lambda c: c.get_nutrition_daily_meals(today_str)),
+        ("get_nutrition_daily_settings", lambda c: c.get_nutrition_daily_settings(today_str)),
 
         # --- NEU: alles, was in garminconnect 0.3.6 sonst noch an lesenden (nicht-mutierenden)
         # Endpunkten existiert und bisher weder oben aktiv noch auskommentiert war. add_*/set_*/

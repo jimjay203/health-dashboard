@@ -13,7 +13,10 @@ import {
 const WEEKDAY_LABELS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"];
 
 function emptyForm(): ClubSlotInput {
-  return { weekday: 0, sport_type: SPORT_TYPES[0], label: "", valid_from: todayIso(), valid_to: null };
+  return {
+    weekday: 0, sport_type: SPORT_TYPES[0], label: "", valid_from: todayIso(), valid_to: null,
+    typical_character: null,
+  };
 }
 
 function ClubSlotsSettings() {
@@ -62,6 +65,7 @@ function ClubSlotsSettings() {
             <th>Label</th>
             <th>Gültig ab</th>
             <th>Gültig bis</th>
+            <th>Charakter</th>
             <th></th>
           </tr>
         </thead>
@@ -75,6 +79,7 @@ function ClubSlotsSettings() {
               <td>{slot.label}</td>
               <td>{slot.valid_from}</td>
               <td>{slot.valid_to ?? "unbegrenzt"}</td>
+              <td>{slot.typical_character ?? "–"}</td>
               <td>
                 <button onClick={() => handleDelete(slot.id)}>Löschen</button>
               </td>
@@ -82,7 +87,7 @@ function ClubSlotsSettings() {
           ))}
           {slots.length === 0 && (
             <tr>
-              <td colSpan={6}>Noch keine Vereins-Slots angelegt.</td>
+              <td colSpan={7}>Noch keine Vereins-Slots angelegt.</td>
             </tr>
           )}
         </tbody>
@@ -125,6 +130,11 @@ function ClubSlotsSettings() {
           type="date"
           value={form.valid_to ?? ""}
           onChange={(e) => setForm({ ...form, valid_to: e.target.value || null })}
+        />
+        <input
+          placeholder="Charakter (optional, z. B. 'Bahntraining: meist Intervalle, 400-1000m')"
+          value={form.typical_character ?? ""}
+          onChange={(e) => setForm({ ...form, typical_character: e.target.value || null })}
         />
         <button type="submit">Slot anlegen</button>
       </form>

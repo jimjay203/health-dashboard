@@ -292,6 +292,58 @@ def build_interval_running_workout(
     )
 
 
+def build_steady_running_workout(
+    name,
+    target_zone=None, target_pace_min_per_km=None,
+    duration_minutes=None, distance_m=None,
+):
+    """Baut ein einfaches, durchgehendes Lauf-Workout (ein einzelner Schritt, kein Warmup/
+    Intervalle/Cooldown) - für lockere Dauerläufe/lange Läufe ohne Struktur, wofür
+    build_interval_running_workout() nicht geeignet ist (erzwingt zwingend Warmup+Intervalle+
+    Cooldown, interval_count >= 1). Nutzt dieselben Low-Level-Bausteine (_build_step,
+    _zone_pace_bounds_m_s) wie die Ad-hoc-Komposition in
+    examples/test_workout_marathon_tempo.py - derselbe einzelne "interval"-Schritttyp wie der
+    Hauptschritt in build_interval_running_workout(), da Garmins eigener Workout-Builder einen
+    einfachen durchgehenden Lauf ebenso als einzelnen "Interval"-Schritt abbildet (kein separater
+    "steady run"-Schritttyp im Paket vorhanden)."""
+    _require_exactly_one("target_zone", target_zone,
+                          "target_pace_min_per_km", target_pace_min_per_km)
+    _require_exactly_one("duration_minutes", duration_minutes, "distance_m", distance_m)
+
+    if target_zone is not None:
+        pace_bounds = _zone_pace_bounds_m_s(target_zone)
+    else:
+        pace_bounds = _pace_value_to_speed_bounds(target_pace_min_per_km)
+
+    if distance_m is not None:
+        step = _build_step(
+            1, StepType.INTERVAL, "interval", 3,
+            DISTANCE_CONDITION_ID, "distance", 3,
+            distance_m, _pace_target_type(), pace_bounds,
+        )
+        avg_speed_m_s = sum(pace_bounds) / 2
+        estimated_total_sec = distance_m / avg_speed_m_s
+    else:
+        step = _build_step(
+            1, StepType.INTERVAL, "interval", 3,
+            TIME_CONDITION_ID, "time", 2,
+            duration_minutes * 60.0, _pace_target_type(), pace_bounds,
+        )
+        estimated_total_sec = duration_minutes * 60.0
+
+    return RunningWorkout(
+        workoutName=name,
+        estimatedDurationInSecs=round(estimated_total_sec),
+        workoutSegments=[
+            WorkoutSegment(
+                segmentOrder=1,
+                sportType={"sportTypeId": 1, "sportTypeKey": "running", "displayOrder": 1},
+                workoutSteps=[step],
+            )
+        ],
+    )
+
+
 def upload_workout(workout, client, schedule_date=None):
     """Lädt ein zuvor mit build_*() erstelltes Workout zu Garmin hoch und plant es optional ein.
     Kein automatischer Aufruf durch build_*() - bewusst getrennt."""

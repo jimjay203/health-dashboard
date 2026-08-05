@@ -291,38 +291,6 @@
   cursor: default;
 }
 
-/* --- Morgen-Karte --- */
-
-.tomorrow-card {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.tomorrow-label {
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text);
-  flex: 0 0 auto;
-}
-
-.tomorrow-body {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.tomorrow-icon {
-  font-size: 20px;
-}
-
-.tomorrow-text {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text-h);
-}
-
 /* --- Metrik-Kacheln --- */
 
 .metric-tiles {
@@ -359,49 +327,218 @@
   height: 30px;
 }
 
-/* --- Wochenstreifen --- */
+/* --- Rolling-Horizon-Kalender-Widget --- */
 
-.week-strip h2 {
+.weekly-calendar-widget {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.calendar-tier h2,
+.calendar-tier h3 {
   text-align: left;
   margin-bottom: 12px;
 }
 
-.week-strip-row {
-  display: flex;
-  gap: 8px;
+.calendar-tier h3 {
+  font-size: 16px;
 }
 
-.day-chip {
-  flex: 1;
+.week-rationale {
+  font-size: 13px;
+  color: var(--text);
+  margin-bottom: 16px;
+}
+
+/* Diese Woche (Fixierungs-Ebene) */
+
+.plan-days-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.plan-day {
+  flex: 1 1 120px;
+  min-width: 120px;
   text-align: center;
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 10px 4px;
+  padding: 10px 8px;
   background: var(--surface-2);
 }
 
-.day-chip.today {
+.plan-day.today {
   border-color: var(--accent);
   background: var(--accent-bg);
 }
 
-.day-chip-weekday {
+.plan-day-weekday {
   font-size: 12px;
   color: var(--text);
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
-.day-chip-icon {
+.plan-day-icon {
   font-size: 20px;
 }
 
-.day-chip-label {
+.plan-day-session {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-h);
+  margin-top: 4px;
+}
+
+.plan-day-detail {
   font-size: 11px;
   color: var(--text);
+  margin-top: 2px;
+}
+
+.plan-day-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.plan-day-actions button,
+.plan-day-actions a {
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-h);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.plan-day-uploaded {
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.plan-day-error {
+  font-size: 11px;
+  color: #e5484d;
   margin-top: 4px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.tier-phase,
+.tier-kw {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.plan-day-date,
+.outlook-day-date {
+  opacity: 0.7;
+}
+
+/* Nächste Woche + Übernächste Woche (Andeutungs-Ebene, kein Gemini-Call, gleiche Regeln) -
+   bewusst kompakter als die "Diese Woche"-Karte: weniger Padding, kleinere Schrift, Sportart als
+   Emoji statt Wort. */
+
+.calendar-tier-outlook {
+  padding: 14px 16px;
+}
+
+.calendar-tier-outlook h3 {
+  margin-bottom: 8px;
+}
+
+.calendar-tier-week2 {
+  opacity: 0.9;
+}
+
+.calendar-tier-week3 {
+  opacity: 0.8;
+}
+
+.outlook-row {
+  display: flex;
+  gap: 4px;
+}
+
+.outlook-day-chip {
+  flex: 1;
+  text-align: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 2px;
+}
+
+.outlook-day-weekday {
+  font-size: 10px;
+  color: var(--text);
+  margin-bottom: 1px;
+}
+
+.outlook-day-icon {
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.outlook-day-hint {
+  font-size: 10px;
+  color: var(--text-h);
+  margin-top: 1px;
+}
+
+/* Alles ab Woche 4 (einfachste Ebene) */
+
+.calendar-tier-far {
+  opacity: 0.7;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.far-week-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text);
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.far-week-bar-kw {
+  font-weight: 600;
+  color: var(--text-h);
+  flex: 0 0 auto;
+}
+
+.far-week-bar-range {
+  flex: 1;
+}
+
+.far-week-bar-phase {
+  flex: 0 0 auto;
+}
+
+/* Die Woche des Rennens selbst - Wettkampf und Datum explizit benannt statt nur der Phase. */
+
+.far-week-bar-race {
+  opacity: 1;
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+}
+
+.far-week-bar-race-label {
+  flex: 0 0 auto;
+  font-weight: 600;
+  color: var(--text-h);
 }
 
 /* --- Vereins-Slot-Einstellungen --- */

@@ -1,20 +1,16 @@
 import { useEffect, useState } from "react";
 import {
   todayIso,
-  tomorrowIso,
   fetchReadiness,
   fetchTrends,
   fetchRecommendation,
-  fetchWeekStrip,
   postOverride,
-  SPORT_TYPE_EMOJI,
   type Readiness,
   type Trends,
   type Recommendation,
-  type WeekStrip,
-  type WeekDay,
   type OverrideValue,
 } from "./api";
+import WeeklyCalendarWidget from "./WeeklyCalendarWidget";
 
 const LEVEL_COLORS: Record<string, string> = {
   LOW: "#e5484d",
@@ -27,25 +23,6 @@ const LEVEL_LABELS_DE: Record<string, string> = {
   MODERATE: "Mittel",
   HIGH: "Hoch",
 };
-
-const CATEGORY_ICON: Record<string, string> = {
-  race: "🏁",
-  completed: "✅",
-  club: "🏃",
-  rest: "😴",
-};
-
-// Bei category="club" zeigt der Wochenstreifen das zur Sportart passende Emoji statt des
-// generischen Club-Icons (siehe api.ts::SPORT_TYPE_EMOJI, gleiche Zuordnung wie im
-// Sportart-Dropdown in ClubSlotsSettings.tsx).
-function dayIcon(day: WeekDay): string {
-  if (day.category === "club" && day.sport_type) {
-    return SPORT_TYPE_EMOJI[day.sport_type];
-  }
-  return CATEGORY_ICON[day.category];
-}
-
-const WEEKDAY_LABELS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 
 function sparklinePoints(values: (number | null)[], width: number, height: number): string {
   const valid = values
@@ -166,49 +143,12 @@ function RecommendationPanel({
   );
 }
 
-function TomorrowCard({ day }: { day: WeekDay | null }) {
-  if (!day) return null;
-  const text = day.category === "rest" ? "Ruhetag" : day.label ?? "Ruhetag";
-  return (
-    <div className="card tomorrow-card">
-      <div className="tomorrow-label">Morgen</div>
-      <div className="tomorrow-body">
-        <span className="tomorrow-icon">{dayIcon(day)}</span>
-        <span className="tomorrow-text">{text}</span>
-      </div>
-    </div>
-  );
-}
-
-function WeekStripView({ weekStrip }: { weekStrip: WeekStrip | null }) {
-  return (
-    <div className="card week-strip">
-      <h2>Diese Woche</h2>
-      {weekStrip ? (
-        <div className="week-strip-row">
-          {weekStrip.days.map((day) => (
-            <div key={day.date} className={`day-chip${day.is_today ? " today" : ""}`}>
-              <div className="day-chip-weekday">{WEEKDAY_LABELS[day.weekday]}</div>
-              <div className="day-chip-icon">{dayIcon(day)}</div>
-              {day.label && <div className="day-chip-label">{day.label}</div>}
-            </div>
-          ))}
-        </div>
-      ) : (
-        <p>Lade Wochenstreifen…</p>
-      )}
-    </div>
-  );
-}
-
 function TodayView() {
   const today = todayIso();
   const [readiness, setReadiness] = useState<Readiness | null>(null);
   const [trends, setTrends] = useState<Trends | null>(null);
   const [recommendation, setRecommendation] = useState<Recommendation | null>(null);
   const [recommendationLoading, setRecommendationLoading] = useState(true);
-  const [weekStrip, setWeekStrip] = useState<WeekStrip | null>(null);
-  const [tomorrow, setTomorrow] = useState<WeekDay | null>(null);
   const [overriding, setOverriding] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -223,14 +163,6 @@ function TodayView() {
       .then(setRecommendation)
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setRecommendationLoading(false));
-    fetchWeekStrip(today)
-      .then(setWeekStrip)
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
-
-    const tomorrowDate = tomorrowIso();
-    fetchWeekStrip(tomorrowDate)
-      .then((strip) => setTomorrow(strip.days.find((d) => d.date === tomorrowDate) ?? null))
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   }, [today]);
 
   async function handleOverride(value: OverrideValue) {
@@ -260,7 +192,6 @@ function TodayView() {
           onOverride={handleOverride}
         />
       </div>
-      <TomorrowCard day={tomorrow} />
       <div className="metric-tiles">
         <MetricTile
           label="HRV"
@@ -291,7 +222,7 @@ function TodayView() {
           color="#f87171"
         />
       </div>
-      <WeekStripView weekStrip={weekStrip} />
+      <WeeklyCalendarWidget />
     </div>
   );
 }

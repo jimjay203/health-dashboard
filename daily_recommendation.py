@@ -9,13 +9,12 @@ eingetragene Zusatzinfos reserviert (siehe insight_memory.py). Ergebnis landet s
 eigenen daily_recommendation-Tabelle.
 """
 import json
-import re
 from datetime import date, datetime
 
 from google.genai import types
 from db import get_connection, upsert_daily_metric
 from gemini_client import MODEL_NAME, get_client
-from context_blocks import insight_memory_block, daily_summary_block
+from context_blocks import insight_memory_block, daily_summary_block, weekly_plan_block, strip_markdown_fences
 
 RESPONSE_SCHEMA = {
     "type": "OBJECT",
@@ -29,7 +28,10 @@ RESPONSE_SCHEMA = {
 SYSTEM_PROMPT = """
 Du bist ein Trainings-Coach-Assistent für einen Marathon-/Triathlon-Athleten. Du bekommst
 Tages-/Wochen-Kennzahlen, das heutige Tagesjournal, ein Erkenntnis-Gedächtnis mit dauerhaften
-Zusatzinfos zum Athleten sowie heutige Termine.
+Zusatzinfos zum Athleten, heutige Termine sowie den WOCHENPLAN (ein bereits am Wochenanfang
+generierter Grobvorschlag für heute, falls vorhanden - dient als Ausgangspunkt, nicht als
+bindende Vorgabe: berücksichtige die aktuellen Tages-Kennzahlen trotzdem, ein guter Grund kann
+vom Wochenplan abweichen).
 
 Gib eine kurze, konkrete Trainingsempfehlung für heute (1-2 Sätze) und 2-4 kurze
 Begründungs-Stichpunkte, die sich direkt auf die gegebenen Kennzahlen/Infos stützen. Falls eine
@@ -101,19 +103,13 @@ def _gather_context(cursor, target_date, override_value=None):
         insight_memory_block(cursor),
         "\n=== HEUTIGE TERMINE ===",
         _events_block(cursor, target_date),
+        "\n=== WOCHENPLAN ===",
+        weekly_plan_block(cursor, target_date),
     ]
     if override_value:
         parts.append("\n=== NUTZER-ÜBERSCHREIBUNG ===")
         parts.append(OVERRIDE_PHRASES.get(override_value, f"Override: {override_value}"))
     return "\n".join(parts)
-
-
-def _strip_markdown_fences(text):
-    text = text.strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
-        text = re.sub(r"\n?```$", "", text)
-    return text.strip()
 
 
 def generate_daily_recommendation(target_date, override_value=None):
@@ -136,7 +132,7 @@ def generate_daily_recommendation(target_date, override_value=None):
             temperature=0.4,
         ),
     )
-    raw = _strip_markdown_fences(response.text or "")
+    raw = strip_markdown_fences(response.text or "")
     try:
         result = json.loads(raw)
     except json.JSONDecodeError as e:
