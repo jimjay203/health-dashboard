@@ -11,3 +11,19 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
+
+  # Schritt 1 des FastAPI+React-Rebuilds (siehe PROJECT_OVERVIEW.md) - läuft parallel zum
+  # bestehenden Streamlit-Service, teilt sich nur die SQLite-Datei über ./data, sonst komplett
+  # unabhängig (eigenes Image, eigener Port).
+  dashboard-v2:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: health_dashboard_v2
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped

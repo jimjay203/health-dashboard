@@ -14,8 +14,43 @@ Workout-Erstellung. Streamlit-Multi-Page-App, Docker-Compose-Betrieb.
 ## Tech-Stack
 
 Streamlit (Multi-Page, dateibasiertes Routing über `pages/`), SQLite über rohes `sqlite3` (kein
-ORM), `garminconnect` (Garmin-API), `google-genai` (Gemini) für Schicht 3, Plotly/pydeck für
+ORM), `garminconnect` (Garmin-API), `google-genai` (Gemini) für Schicht 3/4, Plotly/pydeck für
 Charts/Karten, Docker Compose (`.:/app`-Volume-Mount, d.h. Code-Änderungen wirken ohne Rebuild).
+Daneben ein **paralleles FastAPI+React-Grundgerüst** (`backend/`/`frontend/`, siehe eigener
+Abschnitt unten) als erster Schritt eines geplanten Rebuilds - läuft als zweiter, unabhängiger
+Container neben dem Streamlit-Service, ersetzt ihn noch nicht.
+
+## FastAPI+React-Rebuild (Schritt 1 - bewusst inhaltlich leer)
+
+Neuer, komplett paralleler Service `dashboard-v2` (Port 8000) neben dem bestehenden `dashboard`
+(Streamlit, Port 8501) - keiner der beiden beeinflusst den anderen, beide teilen sich nur
+lesend/schreibend dieselbe SQLite-Datei über ein gemeinsames `./data`-Volume-Mount (nicht den
+ganzen Repo-Ordner wie beim Streamlit-Service).
+
+- **`backend/`** (FastAPI): `main.py` + `routers/daily_summary.py` mit `GET
+  /api/daily-summary/{date}` (liest die bestehende `daily_summary`-Tabelle direkt über
+  `db.py::get_connection()`, Pydantic-Response-Modell, `404` bei fehlendem Datum) und `GET
+  /api/health`. **Layout-Besonderheit:** `db.py` wird unverändert aus dem Repo-Root ins
+  Container-Image kopiert und landet dort direkt neben `main.py` (nicht als Unterpaket importiert)
+  - dadurch funktioniert `from db import get_connection` ohne jede Anpassung an `db.py`, und die
+    relative `DB_PATH`-Auflösung (`"data/dashboard.db"`) passt unverändert, wenn `./data` an
+    dieselbe Stelle gemountet wird. `backend/requirements.txt` ist bewusst von der bestehenden
+    `requirements.txt` getrennt (eigener Container, eigene, viel kleinere Abhängigkeitsliste -
+    `db.py` hat selbst keine Drittanbieter-Abhängigkeiten).
+- **`frontend/`** (React + TypeScript + Vite, Standard-`react-ts`-Scaffold): eine einzige
+  Komponente (`src/App.tsx`), die beim Laden `GET /api/daily-summary/<heute>` abruft und
+  Lade-/Fehler-/Erfolgszustand unterscheidbar zeigt - bewusst ungestylt, das ist Schritt 2.
+  `vite.config.ts` hat einen Dev-Proxy `/api → localhost:8000` für lokales `npm run dev` (Zugabe,
+  im Auftrag nicht gefordert, aber für die künftige Weiterentwicklung praktisch).
+- **`backend/Dockerfile`**: Multi-Stage (Node-Stage baut `frontend/dist`, Python-Stage kopiert das
+  Ergebnis nach `./static` und liefert es selbst über FastAPIs `StaticFiles(html=True)` aus - kein
+  eigener Nginx-Container). Build-Context ist der Repo-Root (`docker-compose.yml`: `context: .,
+  dockerfile: backend/Dockerfile`), damit `db.py` mit ins Image kopiert werden kann.
+- **Bekannter, bewusst nicht behobener Punkt:** beide Container können potenziell gleichzeitig auf
+  dieselbe SQLite-Datei zugreifen. Aktuell unkritisch (der neue Service liest nur, selten, kurze
+  Queries) - falls das später zum Problem wird (z.B. sobald Schritt 2 auch schreibt), ist
+  `PRAGMA journal_mode=WAL` in `db.py::get_connection()` die Standardlösung, aber noch nicht
+  eingebaut.
 
 ## Sync-Architektur
 
@@ -180,6 +215,9 @@ zeigt `tool_calls_json` je Antwort in einem Debug-Expander). CLI-Alternative: `e
 | `pages/5_🧠_Erkenntnisse.py` | UI für Schicht 3 (Einträge hinzufügen/löschen, aktueller Stand) |
 | `pages/6_🏗️_Workout_Builder.py` | Formular zum Erstellen/Hochladen strukturierter Workouts |
 | `pages/7_💬_Chat.py` | UI für Schicht 4 (ChatEngine in st.session_state, Tool-Aufruf-Debug-Expander) |
+| `backend/main.py` | FastAPI-Rebuild Schritt 1: Einstiegspunkt, bindet Router + StaticFiles |
+| `backend/routers/daily_summary.py` | `GET /api/daily-summary/{date}` (liest daily_summary direkt) |
+| `frontend/src/App.tsx` | Einzige React-Komponente des Rebuild-Grundgerüsts (ungestylt) |
 
 ## Datenbank (Auszug nach Kategorie, `db.py`)
 
@@ -216,3 +254,7 @@ zeigt `tool_calls_json` je Antwort in einem Debug-Expander). CLI-Alternative: `e
   Vorschläge sind Objektzustand, siehe oben) - ein Browser-Reload startet also eine neue
   Konversation im Sinne von `_pending_proposals`/`_turn_counter`, auch wenn `chat_history` in der
   DB weiterhin den alten Verlauf anzeigt. Bekannte, akzeptierte Eigenschaft, kein Bug.
+- FastAPI+React-Rebuild ist nur Schritt 1 (siehe eigener Abschnitt oben) - inhaltlich absichtlich
+  leer, keine echte Ansicht/kein Design. `dashboard-v2` ersetzt den Streamlit-Service noch nicht.
+- Gleichzeitiger DB-Zugriff beider Container ist unkritisch, aber noch nicht mit WAL-Modus
+  abgesichert (siehe FastAPI-Abschnitt oben) - Vorschlag steht im Raum, noch nicht umgesetzt.
