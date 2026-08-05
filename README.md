@@ -17,6 +17,7 @@ Gebaut als Streamlit-Multi-Page-App, per Docker Compose deploybar.
 - **💬 Chat** (Gemini, `chat_engine.py`): beantwortet Fragen zu den Trainingsdaten (Whitelist-SQL-Zugriff auf die regelbasierten Auswertungen) und kann Workouts vorschlagen/hochladen — Vorschlag und Upload sind strukturell auf zwei getrennte Nachrichten aufgeteilt, kein automatisches Verketten
 - **⚙️ Settings**: Einzel-Sync, Zeitraum-Backfill, Aktivitäten-Sync sowie eine API-Explorationsfunktion, die alle relevanten Garmin-Endpunkte einmal testweise abruft und die rohen JSON-Antworten anzeigt/speichert
 - **🧪 FastAPI+React-Rebuild (Grundgerüst, Schritt 1)**: paralleler zweiter Container (`dashboard-v2`, Port 8000) mit FastAPI-Backend + React/TypeScript-Frontend, bewusst inhaltlich leer — nur ein Endpoint (`daily_summary` fürs aktuelle Datum), um die komplette Kette einmal nachweislich zum Laufen zu bringen, bevor echte Features folgen. Ersetzt das Streamlit-Dashboard noch nicht.
+- **🌙 Automatischer Sync-Trigger**: Hintergrund-Task im `dashboard-v2`-Container prüft ab 06:00 alle 25 Min. leichtgewichtig, ob die heutigen Schlafdaten vorliegen, und löst dann automatisch den vollen Tages-Sync aus — kein manuelles Anstoßen morgens mehr nötig. Bricht ohne Treffer um 12:00 sichtbar ab (`GET /api/sync-status`). Der manuelle Settings-Button bleibt unverändert als Fallback bestehen.
 
 ## 🧱 Tech Stack
 
@@ -107,7 +108,8 @@ insight_memory.py            # LLM-gestütztes Erkenntnis-Gedächtnis
 gemini_client.py             # Gemeinsame Gemini-Konfiguration
 workout_builder.py           # Erstellt/lädt strukturierte Garmin-Workouts
 chat_engine.py                # Schicht 4: Chat mit Function-Calling (Query-Tool, Workout-Vorschlag/-Upload)
-examples/                    # Eigenständige Nutzungsbeispiele (kein UI), z.B. für workout_builder.py/chat_engine.py
+auto_sync.py                  # Automatischer Sync-Trigger via Schlafdaten-Checker (läuft im dashboard-v2-Container)
+examples/                    # Eigenständige Nutzungsbeispiele (kein UI), z.B. für workout_builder.py/chat_engine.py/auto_sync.py
 backend/                     # FastAPI-Rebuild Schritt 1 (main.py, routers/, eigenes Dockerfile+requirements.txt)
 frontend/                    # React/TypeScript/Vite-Frontend fürs Rebuild-Grundgerüst
 ```
@@ -120,4 +122,5 @@ Ein technischer Gesamtüberblick (Architektur, Konventionen, Datenbank-Kategorie
 - `data/` (SQLite-Datenbank) und `garmin_api_exploration/` (rohe API-Testdaten mit echten persönlichen Daten wie GPS/Gewicht) sind bewusst in `.gitignore` und werden nicht versioniert.
 - Aktivitäten-Sync ist bewusst **manuell** und komplett getrennt vom automatischen Tages-/Backfill-Sync — eine volle Historie kann mehrere hundert Aktivitäten mit je mehreren hundert Detail-Zeilen umfassen.
 - Garmins Rate-Limit (429) ist real und wird ernst genommen: alle Sync-Pfade brechen bei einem 429 sofort ab, statt es erneut zu versuchen.
-- Der `dashboard-v2`-Container (FastAPI+React) teilt sich die SQLite-Datei mit dem Streamlit-Container über ein gemeinsames `./data`-Volume-Mount, nicht das ganze Repo. Aktuell rein lesend, daher unkritisch — bei künftigem gleichzeitigem Schreiben wäre SQLites WAL-Modus die Standardlösung.
+- Der `dashboard-v2`-Container (FastAPI+React) teilt sich die SQLite-Datei mit dem Streamlit-Container über ein gemeinsames `./data`-Volume-Mount, nicht das ganze Repo. Seit dem automatischen Sync-Trigger schreibt er auch (ein voller Sync pro Tag) — bislang unkritisch beobachtet, bei künftigen Problemen wäre SQLites WAL-Modus die Standardlösung.
+- `dashboard` und `dashboard-v2` teilen sich außerdem den Garmin-Session-Token-Cache über `./garmin_tokens:/root/.garminconnect`, damit der automatische Sync-Trigger keinen eigenen, zweiten Passwort-Login braucht.

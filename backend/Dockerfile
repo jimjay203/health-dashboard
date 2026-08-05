@@ -20,9 +20,13 @@ RUN apt-get update && apt-get install -y \
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# db.py wird unverändert aus dem Repo-Root übernommen (nicht Teil von backend/), landet direkt
-# neben main.py, damit "from db import get_connection" ohne Anpassung funktioniert.
-COPY db.py .
+# Alle Root-Level-Module (db.py, garmin_auth.py, garmin_service.py, auto_sync.py, ...) werden
+# unverändert aus dem Repo-Root übernommen (nicht Teil von backend/) und landen direkt neben
+# main.py, damit z.B. "from db import get_connection" ohne jede Anpassung funktioniert. Bewusst
+# "*.py" statt einzelner Dateien - robuster gegenüber wachsenden Abhängigkeiten zwischen den
+# Modulen (aktuell ungenutzte Dateien wie app.py/chat_engine.py landen dabei inert mit im Image,
+# das ist unkritisch). pages/, examples/, backend/, frontend/ werden dadurch NICHT mitkopiert.
+COPY *.py .
 COPY backend/ .
 COPY --from=frontend-build /frontend/dist ./static
 

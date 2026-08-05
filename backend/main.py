@@ -1,15 +1,30 @@
 """
 FastAPI-Einstiegspunkt (Schritt 1 des Rebuilds - bewusst inhaltlich leer, siehe PROJECT_OVERVIEW.md).
-Liegt im Container-Image direkt neben db.py, siehe Dockerfile.
+Liegt im Container-Image direkt neben db.py und den übrigen Root-Level-Modulen, siehe Dockerfile.
 """
+import asyncio
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from routers import daily_summary
+from routers import daily_summary, sync_status
+from auto_sync import run_daily_auto_sync_forever
 
-app = FastAPI(title="Health Dashboard API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Automatischer Sync-Trigger (siehe auto_sync.py) - läuft als Hintergrund-Task im selben
+    # Event-Loop, solange der Container lebt. Kein manueller Anstoß nötig.
+    task = asyncio.create_task(run_daily_auto_sync_forever())
+    yield
+    task.cancel()
+
+
+app = FastAPI(title="Health Dashboard API", lifespan=lifespan)
 
 app.include_router(daily_summary.router)
+app.include_router(sync_status.router)
 
 
 @app.get("/api/health")

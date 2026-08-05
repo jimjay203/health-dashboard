@@ -709,6 +709,21 @@ def init_db():
     )
     """)
 
+    # Status des täglichen Auto-Sync-Triggers (siehe auto_sync.py) - PK date, spaltengruppenweise
+    # per upsert_daily_metric() beschrieben (Check-Spalten vs. Abschluss-Spalten unabhängig).
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS auto_sync_status (
+        date TEXT PRIMARY KEY,
+        first_check_at TIMESTAMP,
+        last_check_at TIMESTAMP,
+        check_count INTEGER DEFAULT 0,
+        sleep_data_found INTEGER DEFAULT 0,
+        full_sync_completed_at TIMESTAMP,
+        gave_up_at TIMESTAMP,
+        last_error TEXT
+    )
+    """)
+
     conn.commit()
     conn.close()
 

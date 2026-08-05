@@ -12,5 +12,8 @@ venv/
 *.sqlite3
 data/
 
+# Garmin-Session-Token (siehe docker-compose.yml, geteiltes Volume - enthält Zugangs-Token)
+garmin_tokens/
+
 # Rohe API-Exploration (enthält echte persönliche Daten: GPS, Gewicht, HF, Profilbilder...)
 garmin_api_exploration/

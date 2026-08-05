@@ -8,13 +8,17 @@ services:
       - .env
     volumes:
       - .:/app
+      # Garmin-Session-Token dauerhaft auf dem Host persistieren (bisher nur in der
+      # Container-Schicht, ging bei Neuerstellung verloren) - und mit dashboard-v2 teilen, damit
+      # dessen Auto-Sync (siehe auto_sync.py) keinen eigenen zweiten Passwort-Login braucht.
+      - ./garmin_tokens:/root/.garminconnect
     environment:
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
 
   # Schritt 1 des FastAPI+React-Rebuilds (siehe PROJECT_OVERVIEW.md) - läuft parallel zum
-  # bestehenden Streamlit-Service, teilt sich nur die SQLite-Datei über ./data, sonst komplett
-  # unabhängig (eigenes Image, eigener Port).
+  # bestehenden Streamlit-Service, teilt sich nur die SQLite-Datei über ./data und den
+  # Garmin-Token-Cache über ./garmin_tokens, sonst komplett unabhängig (eigenes Image, eigener Port).
   dashboard-v2:
     build:
       context: .
@@ -22,8 +26,11 @@ services:
     container_name: health_dashboard_v2
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     volumes:
       - ./data:/app/data
+      - ./garmin_tokens:/root/.garminconnect
     environment:
       - PYTHONUNBUFFERED=1
     restart: unless-stopped

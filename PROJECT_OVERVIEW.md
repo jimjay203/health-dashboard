@@ -20,23 +20,28 @@ Daneben ein **paralleles FastAPI+React-Grundgerüst** (`backend/`/`frontend/`, s
 Abschnitt unten) als erster Schritt eines geplanten Rebuilds - läuft als zweiter, unabhängiger
 Container neben dem Streamlit-Service, ersetzt ihn noch nicht.
 
-## FastAPI+React-Rebuild (Schritt 1 - bewusst inhaltlich leer)
+## FastAPI+React-Rebuild (Schritt 1 - bewusst inhaltlich leer, plus Auto-Sync-Zwischenschritt)
 
 Neuer, komplett paralleler Service `dashboard-v2` (Port 8000) neben dem bestehenden `dashboard`
 (Streamlit, Port 8501) - keiner der beiden beeinflusst den anderen, beide teilen sich nur
 lesend/schreibend dieselbe SQLite-Datei über ein gemeinsames `./data`-Volume-Mount (nicht den
-ganzen Repo-Ordner wie beim Streamlit-Service).
+ganzen Repo-Ordner wie beim Streamlit-Service) sowie den Garmin-Session-Token-Cache über
+`./garmin_tokens:/root/.garminconnect` (siehe `auto_sync.py`-Abschnitt unten - vermeidet einen
+zweiten, unabhängigen Passwort-Login). `dashboard-v2` braucht dafür auch `env_file: .env`
+(Garmin-Zugangsdaten für den seltenen Fallback-Login, falls kein gültiges Token im Cache liegt).
 
 - **`backend/`** (FastAPI): `main.py` + `routers/daily_summary.py` mit `GET
   /api/daily-summary/{date}` (liest die bestehende `daily_summary`-Tabelle direkt über
-  `db.py::get_connection()`, Pydantic-Response-Modell, `404` bei fehlendem Datum) und `GET
-  /api/health`. **Layout-Besonderheit:** `db.py` wird unverändert aus dem Repo-Root ins
-  Container-Image kopiert und landet dort direkt neben `main.py` (nicht als Unterpaket importiert)
-  - dadurch funktioniert `from db import get_connection` ohne jede Anpassung an `db.py`, und die
-    relative `DB_PATH`-Auflösung (`"data/dashboard.db"`) passt unverändert, wenn `./data` an
-    dieselbe Stelle gemountet wird. `backend/requirements.txt` ist bewusst von der bestehenden
-    `requirements.txt` getrennt (eigener Container, eigene, viel kleinere Abhängigkeitsliste -
-    `db.py` hat selbst keine Drittanbieter-Abhängigkeiten).
+  `db.py::get_connection()`, Pydantic-Response-Modell, `404` bei fehlendem Datum), `routers/
+  sync_status.py` (siehe unten) und `GET /api/health`. **Layout-Besonderheit:** alle Root-Level-
+  Module (`db.py`, `garmin_auth.py`, `garmin_service.py`, `auto_sync.py`, ...) werden unverändert
+  aus dem Repo-Root ins Container-Image kopiert (`COPY *.py .` im Dockerfile) und landen dort
+  direkt neben `main.py` (nicht als Unterpaket importiert) - dadurch funktioniert z.B. `from db
+  import get_connection` ohne jede Anpassung, und die relative `DB_PATH`-Auflösung (`"data/
+  dashboard.db"`) passt unverändert, wenn `./data` an dieselbe Stelle gemountet wird.
+  `backend/requirements.txt` ist bewusst von der bestehenden `requirements.txt` getrennt (eigener
+  Container, aber inzwischen nicht mehr minimal - `garminconnect` ist seit dem Auto-Sync-Trigger
+  auch hier nötig).
 - **`frontend/`** (React + TypeScript + Vite, Standard-`react-ts`-Scaffold): eine einzige
   Komponente (`src/App.tsx`), die beim Laden `GET /api/daily-summary/<heute>` abruft und
   Lade-/Fehler-/Erfolgszustand unterscheidbar zeigt - bewusst ungestylt, das ist Schritt 2.
@@ -47,10 +52,59 @@ ganzen Repo-Ordner wie beim Streamlit-Service).
   eigener Nginx-Container). Build-Context ist der Repo-Root (`docker-compose.yml`: `context: .,
   dockerfile: backend/Dockerfile`), damit `db.py` mit ins Image kopiert werden kann.
 - **Bekannter, bewusst nicht behobener Punkt:** beide Container können potenziell gleichzeitig auf
-  dieselbe SQLite-Datei zugreifen. Aktuell unkritisch (der neue Service liest nur, selten, kurze
-  Queries) - falls das später zum Problem wird (z.B. sobald Schritt 2 auch schreibt), ist
-  `PRAGMA journal_mode=WAL` in `db.py::get_connection()` die Standardlösung, aber noch nicht
+  dieselbe SQLite-Datei zugreifen. War anfangs unkritisch (der Service las nur, selten, kurze
+  Queries) - seit dem Auto-Sync-Trigger schreibt `dashboard-v2` jetzt aber täglich einmal
+  (`auto_sync_status`, plus der volle Sync selbst). Weiterhin kein Deadlock/Korruptions-Risiko
+  beobachtet (SQLite serialisiert Schreibzugriffe selbst), aber falls das später zum Problem wird,
+  ist `PRAGMA journal_mode=WAL` in `db.py::get_connection()` die Standardlösung, noch nicht
   eingebaut.
+
+### Auto-Sync-Trigger via Schlafdaten-Checker (`auto_sync.py`)
+
+Zwischenschritt vor der künftigen Heute-Ansicht: ein Hintergrund-Task im `dashboard-v2`-Container,
+der ab `AUTO_SYNC_START_TIME` (06:00) alle `AUTO_SYNC_CHECK_INTERVAL_SECONDS` (25 Min., bewusst
+nicht enger - konsistent mit dem vorsichtigen 429-Handling) leichtgewichtig prüft, ob die heutigen
+Schlafdaten vorliegen, und bei Treffer automatisch `fetch_and_store_garmin_data()` auslöst - ohne
+sich morgens ans manuelle Anstoßen erinnern zu müssen. Bricht ohne Treffer um `AUTO_SYNC_CUTOFF_
+TIME` (12:00) sichtbar ab ("gave_up"). Der bestehende manuelle Sync-Button in den Streamlit-
+Settings bleibt unverändert als Fallback bestehen.
+
+- **`check_sleep_data_available(client, target_date)`**: **Ground-Truth-Fund**, live gegen die
+  echte API verifiziert - `client.get_sleep_data(date)` liefert **immer** ein `dailySleepDTO`-
+  Objekt zurück, auch für Tage ganz ohne Daten, nur mit durchgehend `null`-Feldern. Der Check
+  `"dailySleepDTO" in sleep_data` (wie in `garmin_service.py` für einen anderen Zweck genutzt)
+  taugt deshalb NICHT als Verfügbarkeits-Signal. Zuverlässig: `dailySleepDTO.sleepTimeSeconds`
+  (echter Sekundenwert vs. `None`/`0`) - dieselbe Feld-Konvention, die `garmin_service.py` bereits
+  für `sleep_hours` nutzt. Ein 429 wird durchgereicht, alle anderen Fehler als `(False, "<Meldung>
+  ")`.
+- **`run_auto_sync_loop(...)`**: eine Tages-Schleife, alle Parameter (`start_time`, `cutoff_time`,
+  `interval_seconds`, `check_fn`, `sync_fn`, `client_factory`, `now_fn`) mit Produktions-Default,
+  aber austauschbar - macht die Funktion ohne Warten auf echte Uhrzeiten testbar (Fake-Uhr,
+  Fake-Check-Funktion, siehe `examples/test_auto_sync.py`). Alle blockierenden Garmin-Aufrufe
+  laufen über `asyncio.to_thread()`, sonst würde der FastAPI-Event-Loop während eines Syncs
+  einfrieren. Ein 429 (egal ob beim Client-Aufbau oder beim eigentlichen Check) bricht die
+  **gesamte Tages-Schleife** sofort ab (`_mark_check(..., error="429: ...")`, Status
+  `"rate_limited"`) - kein Retry im selben Tag, konsistent mit dem bestehenden 429-Prinzip.
+  `run_daily_auto_sync_forever()` ist ein dünner Dauerlauf-Wrapper darum (nötig, weil der
+  `restart: unless-stopped`-Container potenziell wochenlang durchläuft) - prüft beim (Neu-)Start,
+  ob der heutige Status schon abgeschlossen ist (Container-Neustart mitten am Tag), sonst startet
+  er direkt; nach Tagesabschluss wird bis zum nächsten `start_time` geschlafen.
+- **Neue Tabelle `auto_sync_status`** (PK `date`): `first_check_at`/`last_check_at`/`check_count`/
+  `sleep_data_found`/`full_sync_completed_at`/`gave_up_at`/`last_error`. Schreibzugriffe über das
+  bestehende `upsert_daily_metric()` (spaltengruppenweise, wie schon bei `daily_summary.journal_*`
+  genutzt) - Check-Fortschritt und Abschluss-Zeitstempel sind unabhängige Spaltengruppen.
+  `get_status(target_date=None)` liest die Zeile (oder einen "not_started"-Default) für den unten
+  genannten Endpoint.
+- **`backend/routers/sync_status.py`**: `GET /api/sync-status` (liest `auto_sync.get_status()`,
+  plus abgeleitetes `status`-Feld: `not_started`/`checking`/`completed`/`gave_up`/`rate_limited`)
+  und `POST /api/sync-trigger` (manueller Sofort-Trigger über die API, Ergänzung - kein Ersatz -
+  zum Streamlit-Button). `backend/main.py` startet den Hintergrund-Task über den `lifespan`-
+  Kontextmanager (moderne FastAPI-Variante statt veraltetem `on_event`).
+- **Live end-to-end verifiziert** (nicht nur Fakes): kompletter Docker-Rebuild, Backend startete
+  den Scheduler automatisch ohne manuellen Anstoß, ein echtes 429 während des ersten
+  Passwort-Logins (ausgelöst durch gleichzeitigen Neustart beider Container nach der
+  Token-Volume-Umstellung) wurde von `garmin_auth.py`s eigener Login-Methoden-Fallback-Kette
+  abgefangen, der Sync lief danach automatisch durch und schrieb echte Daten in `garmin_daily`.
 
 ## Sync-Architektur
 
@@ -58,6 +112,9 @@ ganzen Repo-Ordner wie beim Streamlit-Service).
 zentrale Einstiegspunkt** für alle Garmin-Kern-/Erweiterungsdaten eines Tages. Wird aufgerufen von:
 - Settings-Seite, Einzel-Tages-Sync-Button
 - `garmin_backfill.py::run_backfill()`, das ihn chronologisch vorwärts pro Tag im Zeitraum aufruft
+- `auto_sync.py::run_auto_sync_loop()` (automatischer Trigger, sobald der leichtgewichtige
+  Schlafdaten-Check "vorhanden" meldet - siehe eigener Abschnitt oben) und `POST /api/sync-trigger`
+  (manueller API-Trigger, gleicher Codepfad)
 
 Innerhalb dieser Funktion unterscheiden sich zwei Muster:
 - **"Nur heute"-gegatet** (`if target_date == date.today().isoformat()`): Account-weite
@@ -205,9 +262,11 @@ zeigt `tool_calls_json` je Antwort in einem Debug-Expander). CLI-Alternative: `e
 | `gemini_client.py` | Gemeinsame Gemini-Konfiguration (Key/Modell/Client) |
 | `workout_builder.py` | Erstellt/lädt strukturierte Garmin-Workouts (Pace-/Zonen-Ziele) |
 | `chat_engine.py` | Schicht 4: `ChatEngine` mit Function-Calling (Query-Tool, Workout-Vorschlag/-Upload) |
+| `auto_sync.py` | Automatischer Sync-Trigger: leichtgewichtiger Schlafdaten-Checker + Tages-Loop, löst `fetch_and_store_garmin_data()` aus |
 | `examples/test_workout_builder.py` | Beispiel: einfaches Intervall-Workout (build_interval_running_workout), `python3 -m examples.test_workout_builder` |
 | `examples/test_workout_marathon_tempo.py` | Beispiel: mehrsegmentiges Workout mit Low-Level-Bausteinen |
 | `examples/chat_cli.py` | Terminal-Testskript für chat_engine.py, `python3 -m examples.chat_cli` |
+| `examples/test_auto_sync.py` | Testskript für auto_sync.py: echter API-Ground-Truth-Test + Fake-Orchestrierungstest, `python3 -m examples.test_auto_sync` |
 | `pages/1_🏠_Home.py` | Tagesjournal (löst Journal-Integration aus), Trainingsbereitschaft, Schicht-1/2-Kennzahlen |
 | `pages/2_📊_Health_Trends.py` | Renn-/Workout-Kalender, Endurance-Score, Trends nach Sportart |
 | `pages/3_⚙️_Settings.py` | Sync (Einzel/Backfill), API-Exploration, Aktivitäten-Sync |
@@ -215,8 +274,9 @@ zeigt `tool_calls_json` je Antwort in einem Debug-Expander). CLI-Alternative: `e
 | `pages/5_🧠_Erkenntnisse.py` | UI für Schicht 3 (Einträge hinzufügen/löschen, aktueller Stand) |
 | `pages/6_🏗️_Workout_Builder.py` | Formular zum Erstellen/Hochladen strukturierter Workouts |
 | `pages/7_💬_Chat.py` | UI für Schicht 4 (ChatEngine in st.session_state, Tool-Aufruf-Debug-Expander) |
-| `backend/main.py` | FastAPI-Rebuild Schritt 1: Einstiegspunkt, bindet Router + StaticFiles |
+| `backend/main.py` | FastAPI-Rebuild Schritt 1: Einstiegspunkt, bindet Router + StaticFiles, startet den Auto-Sync-Hintergrund-Task |
 | `backend/routers/daily_summary.py` | `GET /api/daily-summary/{date}` (liest daily_summary direkt) |
+| `backend/routers/sync_status.py` | `GET /api/sync-status`, `POST /api/sync-trigger` (siehe auto_sync.py) |
 | `frontend/src/App.tsx` | Einzige React-Komponente des Rebuild-Grundgerüsts (ungestylt) |
 
 ## Datenbank (Auszug nach Kategorie, `db.py`)
@@ -233,6 +293,7 @@ zeigt `tool_calls_json` je Antwort in einem Debug-Expander). CLI-Alternative: `e
   `sample_pk`), `garmin_personal_records`/`garmin_goals`/`garmin_training_plans` (PK Garmins `id`)
 - **KI-bezogen:** `insight_memory_raw`, `insight_memory_compressed` (append-only), `daily_journal`
   (subjektive Nutzereingaben, PK `date`), `chat_history` (Schicht-4-Konversation, append-only)
+- **Auto-Sync:** `auto_sync_status` (PK `date`, siehe `auto_sync.py`-Abschnitt oben)
 
 ## Wichtige Konventionen
 
