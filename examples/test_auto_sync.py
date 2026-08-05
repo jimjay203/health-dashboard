@@ -64,6 +64,13 @@ async def test_orchestration_with_fakes():
     def fake_client_factory():
         return "FAKE_CLIENT"
 
+    recommendation_calls = []
+
+    def fake_recommendation(target_date):
+        # Kein echter Gemini-Call hier - ohne dieses Fake würde jeder Testlauf einen echten
+        # generate_daily_recommendation()-Aufruf für das erfundene TEST_DATE auslösen.
+        recommendation_calls.append(target_date)
+
     fake_now = datetime.combine(date.today(), dt_time(7, 0))
 
     def fake_now_fn():
@@ -77,16 +84,19 @@ async def test_orchestration_with_fakes():
         check_fn=fake_check,
         sync_fn=fake_sync,
         client_factory=fake_client_factory,
+        recommendation_fn=fake_recommendation,
         now_fn=fake_now_fn,
     )
 
     print("Ergebnis-Status:", status)
     print("Check-Aufrufe:", check_calls)
     print("Sync-Aufrufe:", sync_calls)
+    print("Empfehlungs-Aufrufe:", recommendation_calls)
 
     assert status == "completed"
     assert len(check_calls) == 3
     assert sync_calls == [TEST_DATE]
+    assert recommendation_calls == [TEST_DATE]
 
     db_status = get_status(TEST_DATE)
     print("DB-Status:", db_status)

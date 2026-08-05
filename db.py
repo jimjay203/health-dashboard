@@ -278,6 +278,23 @@ def init_db():
             notable_events_text TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         """,
+        # Heute-Ansicht (siehe daily_recommendation.py) - Gemini-generierte Tagesempfehlung,
+        # als Cache/Snapshot pro Tag gespeichert. NICHT insight_memory - das bleibt ausschließlich
+        # für vom Nutzer selbst eingetragene Zusatzinfos reserviert.
+        "daily_recommendation": """
+            date TEXT PRIMARY KEY,
+            recommendation_text TEXT,
+            reasoning_bullets_json TEXT,
+            generated_at TIMESTAMP
+        """,
+        # "Fühle mich schlechter/besser als der Score sagt" - siehe daily_recommendation.py::
+        # set_override_and_regenerate(). Ein gesetztes Override stößt sofort eine Neugenerierung
+        # der obigen daily_recommendation mit Zusatzkontext an.
+        "daily_override": """
+            date TEXT PRIMARY KEY,
+            override_value TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        """,
     }
     for table_name, columns_sql in daily_tables.items():
         cursor.execute(f"CREATE TABLE IF NOT EXISTS {table_name} ({columns_sql})")
@@ -721,6 +738,20 @@ def init_db():
         full_sync_completed_at TIMESTAMP,
         gave_up_at TIMESTAMP,
         last_error TEXT
+    )
+    """)
+
+    # Wiederkehrende Vereins-Trainingstermine (siehe training_slots.py) - kein date-PK, mehrere
+    # Slots pro Wochentag möglich, daher eigenständige id/AUTOINCREMENT-Tabelle statt Aufnahme in
+    # das obige daily_tables-Dict (das ist ausschließlich für date-PK-Tabellen gedacht).
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS club_training_slots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        weekday INTEGER NOT NULL,
+        sport_type TEXT NOT NULL,
+        label TEXT NOT NULL,
+        valid_from TEXT NOT NULL,
+        valid_to TEXT
     )
     """)
 

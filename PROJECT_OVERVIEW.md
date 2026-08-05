@@ -16,11 +16,13 @@ Workout-Erstellung. Streamlit-Multi-Page-App, Docker-Compose-Betrieb.
 Streamlit (Multi-Page, dateibasiertes Routing über `pages/`), SQLite über rohes `sqlite3` (kein
 ORM), `garminconnect` (Garmin-API), `google-genai` (Gemini) für Schicht 3/4, Plotly/pydeck für
 Charts/Karten, Docker Compose (`.:/app`-Volume-Mount, d.h. Code-Änderungen wirken ohne Rebuild).
-Daneben ein **paralleles FastAPI+React-Grundgerüst** (`backend/`/`frontend/`, siehe eigener
-Abschnitt unten) als erster Schritt eines geplanten Rebuilds - läuft als zweiter, unabhängiger
-Container neben dem Streamlit-Service, ersetzt ihn noch nicht.
+Daneben eine **parallele FastAPI+React-App** (`backend/`/`frontend/`, siehe eigener Abschnitt
+unten) als geplanter Rebuild - läuft als zweiter, unabhängiger Container neben dem
+Streamlit-Service, ersetzt ihn noch nicht. Mittlerweile mehr als ein leeres Grundgerüst: die
+Heute-Ansicht (Readiness-Dial, KI-Empfehlung, Metrik-Kacheln, Wochenstreifen) ist das erste echte
+Feature dort.
 
-## FastAPI+React-Rebuild (Schritt 1 - bewusst inhaltlich leer, plus Auto-Sync-Zwischenschritt)
+## FastAPI+React-Rebuild
 
 Neuer, komplett paralleler Service `dashboard-v2` (Port 8000) neben dem bestehenden `dashboard`
 (Streamlit, Port 8501) - keiner der beiden beeinflusst den anderen, beide teilen sich nur
@@ -30,23 +32,24 @@ ganzen Repo-Ordner wie beim Streamlit-Service) sowie den Garmin-Session-Token-Ca
 zweiten, unabhängigen Passwort-Login). `dashboard-v2` braucht dafür auch `env_file: .env`
 (Garmin-Zugangsdaten für den seltenen Fallback-Login, falls kein gültiges Token im Cache liegt).
 
-- **`backend/`** (FastAPI): `main.py` + `routers/daily_summary.py` mit `GET
-  /api/daily-summary/{date}` (liest die bestehende `daily_summary`-Tabelle direkt über
-  `db.py::get_connection()`, Pydantic-Response-Modell, `404` bei fehlendem Datum), `routers/
-  sync_status.py` (siehe unten) und `GET /api/health`. **Layout-Besonderheit:** alle Root-Level-
-  Module (`db.py`, `garmin_auth.py`, `garmin_service.py`, `auto_sync.py`, ...) werden unverändert
-  aus dem Repo-Root ins Container-Image kopiert (`COPY *.py .` im Dockerfile) und landen dort
-  direkt neben `main.py` (nicht als Unterpaket importiert) - dadurch funktioniert z.B. `from db
-  import get_connection` ohne jede Anpassung, und die relative `DB_PATH`-Auflösung (`"data/
-  dashboard.db"`) passt unverändert, wenn `./data` an dieselbe Stelle gemountet wird.
-  `backend/requirements.txt` ist bewusst von der bestehenden `requirements.txt` getrennt (eigener
-  Container, aber inzwischen nicht mehr minimal - `garminconnect` ist seit dem Auto-Sync-Trigger
-  auch hier nötig).
-- **`frontend/`** (React + TypeScript + Vite, Standard-`react-ts`-Scaffold): eine einzige
-  Komponente (`src/App.tsx`), die beim Laden `GET /api/daily-summary/<heute>` abruft und
-  Lade-/Fehler-/Erfolgszustand unterscheidbar zeigt - bewusst ungestylt, das ist Schritt 2.
+- **`backend/`** (FastAPI): `main.py` + Router in `routers/` (`daily_summary.py`,
+  `sync_status.py`, `today.py`, `club_slots.py` - siehe jeweils eigener Abschnitt) und `GET
+  /api/health`. **Layout-Besonderheit:** alle Root-Level-Module (`db.py`, `garmin_auth.py`,
+  `garmin_service.py`, `auto_sync.py`, `daily_recommendation.py`, `training_slots.py`,
+  `context_blocks.py`, ...) werden unverändert aus dem Repo-Root ins Container-Image kopiert
+  (`COPY *.py .` im Dockerfile) und landen dort direkt neben `main.py` (nicht als Unterpaket
+  importiert) - dadurch funktioniert z.B. `from db import get_connection` ohne jede Anpassung, und
+  die relative `DB_PATH`-Auflösung (`"data/dashboard.db"`) passt unverändert, wenn `./data` an
+  dieselbe Stelle gemountet wird. `backend/requirements.txt` ist bewusst von der bestehenden
+  `requirements.txt` getrennt (eigener Container, aber inzwischen nicht mehr minimal -
+  `garminconnect` und `google-genai` sind seit Auto-Sync-Trigger bzw. Heute-Ansicht auch hier
+  nötig).
+- **`frontend/`** (React + TypeScript + Vite, Standard-`react-ts`-Scaffold, kein CSS-Framework,
+  keine Routing-Bibliothek): `App.tsx` schaltet per einfachem `useState` zwischen zwei Ansichten um
+  (`TodayView`/`ClubSlotsSettings`, siehe "Heute-Ansicht"-Abschnitt unten) - bewusst kein
+  `react-router-dom` für nur zwei Ansichten, kann bei mehr Seiten später nachgerüstet werden.
   `vite.config.ts` hat einen Dev-Proxy `/api → localhost:8000` für lokales `npm run dev` (Zugabe,
-  im Auftrag nicht gefordert, aber für die künftige Weiterentwicklung praktisch).
+  im ursprünglichen Auftrag nicht gefordert, aber für die künftige Weiterentwicklung praktisch).
 - **`backend/Dockerfile`**: Multi-Stage (Node-Stage baut `frontend/dist`, Python-Stage kopiert das
   Ergebnis nach `./static` und liefert es selbst über FastAPIs `StaticFiles(html=True)` aus - kein
   eigener Nginx-Container). Build-Context ist der Repo-Root (`docker-compose.yml`: `context: .,
@@ -105,6 +108,80 @@ Settings bleibt unverändert als Fallback bestehen.
   Passwort-Logins (ausgelöst durch gleichzeitigen Neustart beider Container nach der
   Token-Volume-Umstellung) wurde von `garmin_auth.py`s eigener Login-Methoden-Fallback-Kette
   abgefangen, der Sync lief danach automatisch durch und schrieb echte Daten in `garmin_daily`.
+
+### Heute-Ansicht (Schritt 2): Empfehlungs-Engine, Vereins-Slots, Backend/Frontend
+
+Erstes echtes Feature der neuen App: Readiness-Dial, KI-Empfehlung mit Begründung, vier
+Metrik-Kacheln mit Sparklines, Wochenstreifen. Bewusster Neuaufbau, kein Wiederherstellen des
+früher entfernten `ai_coach.py`.
+
+- **`daily_recommendation.py`** (Repo-Root, kein `streamlit`-Import): `generate_daily_
+  recommendation(target_date, override_value=None)` sammelt Kontext (heutige `daily_summary`-Zeile,
+  aktuelle `weekly_summary`-Zeile, heutiger `daily_journal`-Eintrag, `insight_memory_compressed`
+  nur lesend, heutige `garmin_scheduled_events` über `event_date` - **nicht** die Tabellenspalte
+  `date`, die ist laut Schema-Kommentar ein Monats-Partitionsschlüssel) und ruft Gemini mit
+  striktem `response_schema` auf (gleiches Muster wie `insight_memory.py::_compress`, plus
+  zusätzlich eine `_strip_markdown_fences()`-Vorverarbeitung als Sicherheitsnetz). Ergebnis wird in
+  einer **eigenen** Tabelle `daily_recommendation` (PK `date`) gecacht - **schreibt niemals** in
+  `insight_memory_raw`/`insight_memory_compressed`, das bleibt ausschließlich für vom Nutzer selbst
+  eingetragene Zusatzinfos reserviert (siehe Schicht-3-Abschnitt). `get_cached_recommendation()`
+  liest den Cache; `set_override_and_regenerate(target_date, override_value)` schreibt in eine
+  zweite neue Tabelle `daily_override` (PK `date`, `worse`/`better`/`neutral`) und generiert sofort
+  mit diesem Zusatzkontext neu.
+- **`context_blocks.py`** (neu, Repo-Root): `insight_memory_block(cursor)`/`daily_summary_block
+  (cursor, target_date)` - aus `chat_engine.py` herausgelöste, wiederverwendbare Kontext-Bausteine
+  (beide reine Lesefunktionen auf einem `sqlite3.Cursor`), jetzt von `chat_engine.py` UND
+  `daily_recommendation.py` genutzt statt dupliziert.
+- **`training_slots.py`** (neu, Repo-Root): CRUD für wiederkehrende Vereins-Trainingstermine
+  (Tabelle `club_training_slots`, PK `id` AUTOINCREMENT, mehrere Slots pro Wochentag möglich).
+  Handgeschriebenes SQL nach dem Vorbild von `insight_memory.py::add_raw_entry`/`delete_raw_entry`
+  (kein `db.py`-Generic-Helper - die bestehenden Upsert-Helfer sind auf "ein Datensatz pro
+  natürlichem Schlüssel" ausgelegt, nicht auf id-basiertes CRUD). `sport_type` ist auf eine feste
+  Werteliste beschränkt (`Schwimmen`/`Laufen`/`Rad`/`Krafttraining`/`Mobility`) - validiert per
+  Pydantic `Literal` in `backend/routers/club_slots.py::SportType` (kein SQLite-`CHECK`, das lässt
+  sich nicht per `ALTER TABLE` nachträglich ändern, siehe Konventionen unten). Emoji-Zuordnung fürs
+  Wochenstreifen-Icon lebt bewusst im Frontend (`api.ts::SPORT_TYPE_EMOJI`), nicht im Backend - rein
+  präsentatorisch. `GET /api/week-strip` liefert bei `category="club"` zusätzlich das `sport_type`
+  des Slots mit, damit das Frontend das passende Icon statt eines generischen Club-Symbols zeigt.
+- **Auto-Sync-Integration:** `run_auto_sync_loop()` (siehe oben) ruft nach erfolgreichem Sync
+  best-effort `recommendation_fn(target_date)` auf (Default `generate_daily_recommendation`, neuer
+  austauschbarer Parameter im selben DI-Muster wie `check_fn`/`sync_fn`) - ein Gemini-Fehler kippt
+  den bereits erfolgreichen Sync-Status nicht, wird nur geloggt. Ohne diesen Parameter würde
+  `examples/test_auto_sync.py`s Fake-Orchestrierungstest bei jedem Lauf einen echten Gemini-Call
+  auslösen; das Testskript nutzt daher einen Fake-`recommendation_fn`.
+- **`backend/routers/today.py`** (neu, bündelt alle 5 Endpoints - einzeln zu klein für je eine
+  eigene Datei): `GET /api/readiness/{date}` (liest `garmin_training_readiness`), `GET
+  /api/trends/{date}?days=14` (liest `garmin_daily`: `avg_hrv`/`sleep_hours`/`resting_hr`/
+  `body_battery_max` - **nur** `body_battery_max`, nicht `_min`, konsistent mit den anderen drei
+  Kacheln als je ein Tageswert), `GET /api/daily-recommendation/{date}` (Cache-Read, bei Miss
+  einmalig **Lazy-Fallback**-Generierung), `POST /api/daily-override/{date}` (Body
+  `{override_value}`, gibt die frisch regenerierte Empfehlung direkt zurück), `GET
+  /api/week-strip/{date}` (siehe Prioritätslogik unten). Alle als synchrone `def`-Handler wie
+  `daily_summary.py` - FastAPI führt sie automatisch im Threadpool aus, kein
+  `asyncio.to_thread()` nötig (anders als in `auto_sync.py`, das selbst im Event-Loop läuft).
+- **Wochenstreifen-Priorität** (`GET /api/week-strip/{date}`, Mo-So-Fenster lokal per
+  `isocalendar()` berechnet): pro Tag genau eine Kategorie nach fester Priorität - `race`
+  (`garmin_scheduled_events`, `is_race=1`, `event_date`) schlägt `completed` (`garmin_activities`,
+  `date(start_time_local)` - was tatsächlich passiert ist, ist informativer als der Plan) schlägt
+  `club` (`club_training_slots`, passender `weekday` + `valid_from`/`valid_to`-Fenster) schlägt
+  `rest` (Fallback). `is_today` ist ein **unabhängiges** Boolean-Feld, nicht Teil der Kette.
+- **`backend/routers/club_slots.py`** (neu): `GET`/`POST`/`PUT /{slot_id}`/`DELETE /{slot_id}` auf
+  `/api/club-slots`, dünne Pydantic-Wrapper um `training_slots.py`.
+- **Frontend** (`frontend/src/`): `api.ts` (typisierte `fetch()`-Wrapper für alle 9 Endpoints),
+  `TodayView.tsx` (Readiness-Dial als Inline-SVG mit `stroke-dasharray`, Zonenfarbe nach `level`;
+  Empfehlungs-Panel mit den zwei Override-Buttons; vier Metrik-Kacheln mit handgerollten
+  Inline-SVG-Sparklines aus `/api/trends`, kein Chart-Framework; Wochenstreifen mit Icon/
+  Hervorhebung), `ClubSlotsSettings.tsx` (einfache Liste + Formular, lebt bewusst im neuen
+  Frontend statt in der alten Streamlit-Settings-Seite - die hat aktuell ohnehin keinerlei
+  CRUD-/Formular-Logik dieser Art). Styling in `App.css` (zuvor nie importiertes Vite-Boilerplate,
+  jetzt durch echte, an den bestehenden CSS-Custom-Properties orientierte Styles ersetzt).
+- **Live end-to-end verifiziert:** `generate_daily_recommendation()`/`set_override_and_regenerate()`
+  gegen echte Daten, alle 9 Endpoints per `curl` (inkl. Lazy-Fallback bei geleertem Cache, Club-Slot
+  landet korrekt im Wochenstreifen am richtigen Wochentag, Renn-Tag behält Priorität), Docker-Build
+  inkl. Frontend-Build (`tsc -b && vite build`) fehlerfrei, Streamlit-App/alte Tabellen unverändert
+  (`git diff` auf `pages/`/`garmin_service.py`/`app.py` leer). Kein automatisierter Browser-/
+  Interaktionstest (kein Browser-Automatisierungswerkzeug verfügbar) - nur indirekt über
+  API-Response-Form vs. TypeScript-Interfaces und erfolgreichen Asset-Abruf bestätigt.
 
 ## Sync-Architektur
 
@@ -165,7 +242,10 @@ Aufbauender Kontext für den Chat (Schicht 4, siehe eigener Abschnitt unten):
   `user`/`claude_import`/`journal`). **Enthält bewusst keine aus Trainingsdaten abgeleiteten
   Inhalte** — ein früherer Ansatz, der täglich automatisch Kennzahlen einmischte, wurde wieder
   verworfen, weil das Gedächtnis dadurch nur ein Trainingstagebuch dupliziert hätte statt echte,
-  dauerhafte Athleten-Erkenntnisse zu sammeln.
+  dauerhafte Athleten-Erkenntnisse zu sammeln. Die Gemini-generierte Tagesempfehlung der
+  Heute-Ansicht (`daily_recommendation.py`, siehe "Heute-Ansicht"-Abschnitt oben) ist bewusst
+  **kein** Teil von Schicht 3 - eigene Tabelle, liest `insight_memory_compressed` nur, schreibt nie
+  hinein.
 
 - **Schicht 4** (`chat_engine.py`): der eigentliche Chat, baut auf Schicht 1-3 und
   `workout_builder.py` auf. Siehe eigener Abschnitt unten.
@@ -262,7 +342,10 @@ zeigt `tool_calls_json` je Antwort in einem Debug-Expander). CLI-Alternative: `e
 | `gemini_client.py` | Gemeinsame Gemini-Konfiguration (Key/Modell/Client) |
 | `workout_builder.py` | Erstellt/lädt strukturierte Garmin-Workouts (Pace-/Zonen-Ziele) |
 | `chat_engine.py` | Schicht 4: `ChatEngine` mit Function-Calling (Query-Tool, Workout-Vorschlag/-Upload) |
-| `auto_sync.py` | Automatischer Sync-Trigger: leichtgewichtiger Schlafdaten-Checker + Tages-Loop, löst `fetch_and_store_garmin_data()` aus |
+| `auto_sync.py` | Automatischer Sync-Trigger: leichtgewichtiger Schlafdaten-Checker + Tages-Loop, löst `fetch_and_store_garmin_data()` und `generate_daily_recommendation()` aus |
+| `context_blocks.py` | Wiederverwendbare Gemini-Kontext-Bausteine, geteilt von chat_engine.py und daily_recommendation.py |
+| `daily_recommendation.py` | Heute-Ansicht: Gemini-generierte Tagesempfehlung inkl. Override-Regenerierung |
+| `training_slots.py` | CRUD für wiederkehrende Vereins-Trainingstermine (club_training_slots) |
 | `examples/test_workout_builder.py` | Beispiel: einfaches Intervall-Workout (build_interval_running_workout), `python3 -m examples.test_workout_builder` |
 | `examples/test_workout_marathon_tempo.py` | Beispiel: mehrsegmentiges Workout mit Low-Level-Bausteinen |
 | `examples/chat_cli.py` | Terminal-Testskript für chat_engine.py, `python3 -m examples.chat_cli` |
@@ -277,7 +360,12 @@ zeigt `tool_calls_json` je Antwort in einem Debug-Expander). CLI-Alternative: `e
 | `backend/main.py` | FastAPI-Rebuild Schritt 1: Einstiegspunkt, bindet Router + StaticFiles, startet den Auto-Sync-Hintergrund-Task |
 | `backend/routers/daily_summary.py` | `GET /api/daily-summary/{date}` (liest daily_summary direkt) |
 | `backend/routers/sync_status.py` | `GET /api/sync-status`, `POST /api/sync-trigger` (siehe auto_sync.py) |
-| `frontend/src/App.tsx` | Einzige React-Komponente des Rebuild-Grundgerüsts (ungestylt) |
+| `backend/routers/today.py` | Heute-Ansicht: readiness/trends/daily-recommendation/daily-override/week-strip (5 Endpoints) |
+| `backend/routers/club_slots.py` | CRUD auf /api/club-slots (siehe training_slots.py) |
+| `frontend/src/App.tsx` | Ansichtsumschalter (Heute/Einstellungen), kein Routing |
+| `frontend/src/TodayView.tsx` | Heute-Ansicht: Readiness-Dial, Empfehlungs-Panel, Metrik-Kacheln, Wochenstreifen |
+| `frontend/src/ClubSlotsSettings.tsx` | Einfache Liste + Formular für Vereins-Trainingstermine |
+| `frontend/src/api.ts` | Typisierte fetch()-Wrapper für alle Backend-Endpoints |
 
 ## Datenbank (Auszug nach Kategorie, `db.py`)
 
@@ -294,6 +382,8 @@ zeigt `tool_calls_json` je Antwort in einem Debug-Expander). CLI-Alternative: `e
 - **KI-bezogen:** `insight_memory_raw`, `insight_memory_compressed` (append-only), `daily_journal`
   (subjektive Nutzereingaben, PK `date`), `chat_history` (Schicht-4-Konversation, append-only)
 - **Auto-Sync:** `auto_sync_status` (PK `date`, siehe `auto_sync.py`-Abschnitt oben)
+- **Heute-Ansicht:** `daily_recommendation`/`daily_override` (PK `date`), `club_training_slots`
+  (PK `id` AUTOINCREMENT, siehe "Heute-Ansicht"-Abschnitt oben)
 
 ## Wichtige Konventionen
 
@@ -315,7 +405,15 @@ zeigt `tool_calls_json` je Antwort in einem Debug-Expander). CLI-Alternative: `e
   Vorschläge sind Objektzustand, siehe oben) - ein Browser-Reload startet also eine neue
   Konversation im Sinne von `_pending_proposals`/`_turn_counter`, auch wenn `chat_history` in der
   DB weiterhin den alten Verlauf anzeigt. Bekannte, akzeptierte Eigenschaft, kein Bug.
-- FastAPI+React-Rebuild ist nur Schritt 1 (siehe eigener Abschnitt oben) - inhaltlich absichtlich
-  leer, keine echte Ansicht/kein Design. `dashboard-v2` ersetzt den Streamlit-Service noch nicht.
+- FastAPI+React-Rebuild hat mit der Heute-Ansicht das erste echte Feature (siehe eigener Abschnitt
+  oben), ist aber weiterhin nur ein Ausschnitt der gesamten Streamlit-App. `dashboard-v2` ersetzt
+  den Streamlit-Service noch nicht.
 - Gleichzeitiger DB-Zugriff beider Container ist unkritisch, aber noch nicht mit WAL-Modus
   abgesichert (siehe FastAPI-Abschnitt oben) - Vorschlag steht im Raum, noch nicht umgesetzt.
+- Frontend-Navigation ist ein einfacher `useState`-Umschalter ohne Routing-Bibliothek (siehe
+  FastAPI-Abschnitt oben) - bewusste Entscheidung für aktuell zwei Ansichten, sollte bei weiteren
+  Seiten auf `react-router-dom` o.ä. umgestellt werden.
+- Die Heute-Ansicht wurde nicht in einem echten Browser visuell getestet (kein
+  Browser-Automatisierungswerkzeug in dieser Session verfügbar) - nur indirekt über
+  API-Response-Form vs. TypeScript-Interfaces, erfolgreichen Docker-Frontend-Build und
+  Asset-Abruf bestätigt. Manueller Blick ins Frontend unter localhost:8000 steht noch aus.

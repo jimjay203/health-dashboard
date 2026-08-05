@@ -17,6 +17,7 @@ from datetime import date, datetime, time as dt_time, timedelta
 from garminconnect import GarminConnectTooManyRequestsError
 from garmin_auth import get_garmin_client
 from garmin_service import fetch_and_store_garmin_data
+from daily_recommendation import generate_daily_recommendation
 from db import get_connection, upsert_daily_metric
 
 AUTO_SYNC_START_TIME = dt_time(6, 0)
@@ -129,6 +130,7 @@ async def run_auto_sync_loop(
     check_fn=check_sleep_data_available,
     sync_fn=fetch_and_store_garmin_data,
     client_factory=get_garmin_client,
+    recommendation_fn=generate_daily_recommendation,
     now_fn=datetime.now,
 ):
     """Eine Tages-Schleife: wartet bis start_time, prüft dann im interval_seconds-Takt bis
@@ -160,6 +162,13 @@ async def run_auto_sync_loop(
         if found:
             await asyncio.to_thread(sync_fn, target_date, client)
             _mark_sync_completed(target_date)
+            # Best effort: die Heute-Ansicht (siehe daily_recommendation.py) hat einen eigenen
+            # Lazy-Fallback für fehlende/fehlgeschlagene Empfehlungen - ein Gemini-Fehler hier darf
+            # den bereits erfolgreichen Sync-Status daher nicht kippen, nur geloggt werden.
+            try:
+                await asyncio.to_thread(recommendation_fn, target_date)
+            except Exception as e:
+                print(f"⚠️  auto_sync: Empfehlungsgenerierung fehlgeschlagen: {e}")
             return "completed"
 
         await asyncio.sleep(interval_seconds)

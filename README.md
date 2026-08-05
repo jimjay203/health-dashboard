@@ -16,8 +16,8 @@ Gebaut als Streamlit-Multi-Page-App, per Docker Compose deploybar.
 - **🏗️ Workout Builder**: strukturierte Intervall-Lauf-Workouts (Warmup/Intervalle/Erholung/Cooldown) per Formular erstellen und direkt zu Garmin Connect hochladen, Pace-Ziele aus den aktuellen Trainingszonen
 - **💬 Chat** (Gemini, `chat_engine.py`): beantwortet Fragen zu den Trainingsdaten (Whitelist-SQL-Zugriff auf die regelbasierten Auswertungen) und kann Workouts vorschlagen/hochladen — Vorschlag und Upload sind strukturell auf zwei getrennte Nachrichten aufgeteilt, kein automatisches Verketten
 - **⚙️ Settings**: Einzel-Sync, Zeitraum-Backfill, Aktivitäten-Sync sowie eine API-Explorationsfunktion, die alle relevanten Garmin-Endpunkte einmal testweise abruft und die rohen JSON-Antworten anzeigt/speichert
-- **🧪 FastAPI+React-Rebuild (Grundgerüst, Schritt 1)**: paralleler zweiter Container (`dashboard-v2`, Port 8000) mit FastAPI-Backend + React/TypeScript-Frontend, bewusst inhaltlich leer — nur ein Endpoint (`daily_summary` fürs aktuelle Datum), um die komplette Kette einmal nachweislich zum Laufen zu bringen, bevor echte Features folgen. Ersetzt das Streamlit-Dashboard noch nicht.
-- **🌙 Automatischer Sync-Trigger**: Hintergrund-Task im `dashboard-v2`-Container prüft ab 06:00 alle 25 Min. leichtgewichtig, ob die heutigen Schlafdaten vorliegen, und löst dann automatisch den vollen Tages-Sync aus — kein manuelles Anstoßen morgens mehr nötig. Bricht ohne Treffer um 12:00 sichtbar ab (`GET /api/sync-status`). Der manuelle Settings-Button bleibt unverändert als Fallback bestehen.
+- **🧪 FastAPI+React-Rebuild**: paralleler zweiter Container (`dashboard-v2`, Port 8000) mit FastAPI-Backend + React/TypeScript-Frontend, perspektivischer Ersatz für das Streamlit-Dashboard (aktuell noch nicht vollständig). Enthält bereits die **Heute-Ansicht**: Readiness-Dial, Gemini-generierte Tagesempfehlung mit Begründung (eigene Empfehlungs-Engine, getrennt vom Erkenntnis-Gedächtnis) inkl. Override ("fühle mich schlechter/besser" → sofortige Neugenerierung mit Zusatzkontext), vier Metrik-Kacheln mit Sparklines (HRV, Schlaf, Body Battery, Ruhepuls) und ein Wochenstreifen (fertig absolviert/Vereinstermin/Rennen/Ruhetag, konfigurierbare wiederkehrende Vereins-Trainingstermine über eine eigene Einstellungs-Ansicht im neuen Frontend).
+- **🌙 Automatischer Sync-Trigger**: Hintergrund-Task im `dashboard-v2`-Container prüft ab 06:00 alle 25 Min. leichtgewichtig, ob die heutigen Schlafdaten vorliegen, und löst dann automatisch den vollen Tages-Sync sowie die Tagesempfehlung (s.o.) aus — kein manuelles Anstoßen morgens mehr nötig. Bricht ohne Treffer um 12:00 sichtbar ab (`GET /api/sync-status`). Der manuelle Settings-Button bleibt unverändert als Fallback bestehen.
 
 ## 🧱 Tech Stack
 
@@ -64,8 +64,8 @@ docker compose up -d --build
 ```
 
 Das Dashboard läuft danach unter [http://localhost:8501](http://localhost:8501). Zusätzlich
-startet ein zweiter, unabhängiger Container mit dem FastAPI+React-Rebuild-Grundgerüst unter
-[http://localhost:8000](http://localhost:8000) (siehe oben, aktuell bewusst inhaltlich leer).
+startet ein zweiter, unabhängiger Container mit dem FastAPI+React-Rebuild inkl. Heute-Ansicht
+unter [http://localhost:8000](http://localhost:8000) (siehe oben).
 
 ### 3. Erste Daten holen
 
@@ -108,10 +108,13 @@ insight_memory.py            # LLM-gestütztes Erkenntnis-Gedächtnis
 gemini_client.py             # Gemeinsame Gemini-Konfiguration
 workout_builder.py           # Erstellt/lädt strukturierte Garmin-Workouts
 chat_engine.py                # Schicht 4: Chat mit Function-Calling (Query-Tool, Workout-Vorschlag/-Upload)
+context_blocks.py             # Gemeinsame Gemini-Kontext-Bausteine (chat_engine.py + daily_recommendation.py)
 auto_sync.py                  # Automatischer Sync-Trigger via Schlafdaten-Checker (läuft im dashboard-v2-Container)
+daily_recommendation.py       # Heute-Ansicht: Gemini-generierte Tagesempfehlung inkl. Override
+training_slots.py             # CRUD für wiederkehrende Vereins-Trainingstermine
 examples/                    # Eigenständige Nutzungsbeispiele (kein UI), z.B. für workout_builder.py/chat_engine.py/auto_sync.py
-backend/                     # FastAPI-Rebuild Schritt 1 (main.py, routers/, eigenes Dockerfile+requirements.txt)
-frontend/                    # React/TypeScript/Vite-Frontend fürs Rebuild-Grundgerüst
+backend/                     # FastAPI-Rebuild (main.py, routers/, eigenes Dockerfile+requirements.txt)
+frontend/                    # React/TypeScript/Vite-Frontend (Heute-Ansicht, Vereins-Slot-Einstellungen)
 ```
 
 Ein technischer Gesamtüberblick (Architektur, Konventionen, Datenbank-Kategorien) steht in

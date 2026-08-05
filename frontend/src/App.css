@@ -1,184 +1,461 @@
-.counter {
-  font-size: 16px;
-  padding: 5px 10px;
-  border-radius: 5px;
-  color: var(--accent);
-  background: var(--accent-bg);
-  border: 2px solid transparent;
-  transition: border-color 0.3s;
-  margin-bottom: 24px;
+/* --- App-Shell: Sidebar + Content --- */
 
-  &:hover {
-    border-color: var(--accent-border);
-  }
-  &:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-  }
+.app-shell {
+  display: flex;
+  min-height: 100svh;
+  width: 100%;
+  text-align: left;
 }
 
-.hero {
-  position: relative;
-
-  .base,
-  .framework,
-  .vite {
-    inset-inline: 0;
-    margin: 0 auto;
-  }
-
-  .base {
-    width: 170px;
-    position: relative;
-    z-index: 0;
-  }
-
-  .framework,
-  .vite {
-    position: absolute;
-  }
-
-  .framework {
-    z-index: 1;
-    top: 34px;
-    height: 28px;
-    transform: perspective(2000px) rotateZ(300deg) rotateX(44deg) rotateY(39deg)
-      scale(1.4);
-  }
-
-  .vite {
-    z-index: 0;
-    top: 107px;
-    height: 26px;
-    width: auto;
-    transform: perspective(2000px) rotateZ(300deg) rotateX(40deg) rotateY(39deg)
-      scale(0.8);
-  }
+.sidebar {
+  flex: 0 0 260px;
+  box-sizing: border-box;
+  padding: 24px 16px;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  position: sticky;
+  top: 0;
+  height: 100svh;
+  overflow-y: auto;
 }
 
-#center {
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px;
+  margin-bottom: 28px;
+}
+
+.sidebar-brand-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #04140c;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.sidebar-brand-name {
+  font-weight: 600;
+  color: var(--text-h);
+  font-size: 15px;
+}
+
+.sidebar-nav {
   display: flex;
   flex-direction: column;
-  gap: 25px;
-  place-content: center;
-  place-items: center;
-  flex-grow: 1;
-
-  @media (max-width: 1024px) {
-    padding: 32px 20px 24px;
-    gap: 18px;
-  }
+  gap: 4px;
 }
 
-#next-steps {
+.sidebar-nav-item {
   display: flex;
-  border-top: 1px solid var(--border);
+  align-items: center;
+  gap: 10px;
+  font: inherit;
+  font-size: 15px;
   text-align: left;
-
-  & > div {
-    flex: 1 1 0;
-    padding: 32px;
-    @media (max-width: 1024px) {
-      padding: 24px 20px;
-    }
-  }
-
-  .icon {
-    margin-bottom: 16px;
-    width: 22px;
-    height: 22px;
-  }
-
-  @media (max-width: 1024px) {
-    flex-direction: column;
-    text-align: center;
-  }
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
 }
 
-#docs {
-  border-right: 1px solid var(--border);
-
-  @media (max-width: 1024px) {
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-  }
+.sidebar-nav-item:hover {
+  background: var(--surface-2);
 }
 
-#next-steps ul {
-  list-style: none;
-  padding: 0;
+.sidebar-nav-item.active {
+  background: var(--accent-bg);
+  color: var(--text-h);
+  font-weight: 600;
+}
+
+.sidebar-nav-icon {
+  font-size: 16px;
+}
+
+.main-content {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+}
+
+.main-content-body {
+  padding: 8px 32px 48px;
+  box-sizing: border-box;
+}
+
+/* --- Top-Bar --- */
+
+.top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 24px 32px 16px;
+  flex-wrap: wrap;
+}
+
+.top-bar-clock {
+  font-size: 13px;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.top-bar-title {
+  font-size: 28px;
+  letter-spacing: normal;
+  margin: 0 0 4px;
+}
+
+.top-bar-subtitle {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.top-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sync-badge {
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.sync-badge-ok {
+  color: var(--accent);
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+}
+
+.sync-badge-checking {
+  color: #f5a623;
+  border-color: rgba(245, 166, 35, 0.4);
+  background: rgba(245, 166, 35, 0.1);
+}
+
+.sync-badge-warn {
+  color: #e5484d;
+  border-color: rgba(229, 72, 77, 0.4);
+  background: rgba(229, 72, 77, 0.1);
+}
+
+.sync-badge-idle {
+  color: var(--text);
+}
+
+.sync-badge-time {
+  opacity: 0.8;
+}
+
+.theme-toggle {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.theme-toggle button {
+  font-size: 14px;
+  line-height: 1;
+  padding: 6px 9px;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.theme-toggle button.active {
+  background: var(--accent-bg);
+}
+
+/* --- Generische Karte --- */
+
+.card {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+.error-banner {
+  color: #e5484d;
+  margin-bottom: 16px;
+}
+
+/* --- Day-Score-Karte --- */
+
+.today-view {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.day-score-card {
+  display: flex;
+  gap: 28px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.readiness-dial {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.readiness-dial-score {
+  font-size: 30px;
+  font-weight: 700;
+  fill: var(--text-h);
+}
+
+.readiness-dial-caption {
+  font-size: 10px;
+  fill: var(--text);
+  letter-spacing: 0.08em;
+}
+
+.day-score-pill {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid;
+  background: transparent;
+}
+
+.recommendation-panel {
+  flex: 1 1 320px;
+}
+
+.recommendation-label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.recommendation-text {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-h);
+  margin-bottom: 12px;
+}
+
+.reasoning-bullets {
+  margin: 0 0 16px;
+  padding-left: 20px;
+  text-align: left;
+  color: var(--text);
+}
+
+.reasoning-bullets li {
+  margin-bottom: 6px;
+}
+
+.override-buttons {
   display: flex;
   gap: 8px;
-  margin: 32px 0 0;
+}
 
-  .logo {
-    height: 18px;
-  }
+.override-buttons button {
+  font: inherit;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-h);
+  cursor: pointer;
+}
 
-  a {
-    color: var(--text-h);
-    font-size: 16px;
-    border-radius: 6px;
-    background: var(--social-bg);
-    display: flex;
-    padding: 6px 12px;
-    align-items: center;
-    gap: 8px;
-    text-decoration: none;
-    transition: box-shadow 0.3s;
+.override-buttons button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 
-    &:hover {
-      box-shadow: var(--shadow);
-    }
-    .button-icon {
-      height: 18px;
-      width: 18px;
-    }
-  }
+/* --- Morgen-Karte --- */
 
-  @media (max-width: 1024px) {
-    margin-top: 20px;
-    flex-wrap: wrap;
-    justify-content: center;
+.tomorrow-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
 
-    li {
-      flex: 1 1 calc(50% - 8px);
-    }
+.tomorrow-label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text);
+  flex: 0 0 auto;
+}
 
-    a {
-      width: 100%;
-      justify-content: center;
-      box-sizing: border-box;
-    }
+.tomorrow-body {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tomorrow-icon {
+  font-size: 20px;
+}
+
+.tomorrow-text {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+/* --- Metrik-Kacheln --- */
+
+.metric-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+@media (max-width: 900px) {
+  .metric-tiles {
+    grid-template-columns: repeat(2, 1fr);
   }
 }
 
-#spacer {
-  height: 88px;
-  border-top: 1px solid var(--border);
-  @media (max-width: 1024px) {
-    height: 48px;
-  }
+.metric-tile {
+  text-align: left;
 }
 
-.ticks {
-  position: relative;
+.metric-tile-label {
+  font-size: 13px;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.metric-tile-value {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-h);
+  margin-bottom: 8px;
+}
+
+.metric-tile-sparkline {
   width: 100%;
+  height: 30px;
+}
 
-  &::before,
-  &::after {
-    content: '';
-    position: absolute;
-    top: -4.5px;
-    border: 5px solid transparent;
-  }
+/* --- Wochenstreifen --- */
 
-  &::before {
-    left: 0;
-    border-left-color: var(--border);
-  }
-  &::after {
-    right: 0;
-    border-right-color: var(--border);
-  }
+.week-strip h2 {
+  text-align: left;
+  margin-bottom: 12px;
+}
+
+.week-strip-row {
+  display: flex;
+  gap: 8px;
+}
+
+.day-chip {
+  flex: 1;
+  text-align: center;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 4px;
+  background: var(--surface-2);
+}
+
+.day-chip.today {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.day-chip-weekday {
+  font-size: 12px;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.day-chip-icon {
+  font-size: 20px;
+}
+
+.day-chip-label {
+  font-size: 11px;
+  color: var(--text);
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- Vereins-Slot-Einstellungen --- */
+
+.club-slots-settings h2 {
+  text-align: left;
+  margin-bottom: 12px;
+}
+
+.club-slots-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 20px;
+  text-align: left;
+}
+
+.club-slots-table th,
+.club-slots-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+
+.club-slots-table button {
+  font: inherit;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  cursor: pointer;
+}
+
+.club-slot-form {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.club-slot-form input,
+.club-slot-form select {
+  font: inherit;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-h);
+}
+
+.club-slot-form button {
+  font: inherit;
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--text-h);
+  cursor: pointer;
 }

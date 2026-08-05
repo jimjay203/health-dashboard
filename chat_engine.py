@@ -23,6 +23,7 @@ from db import get_connection, DB_PATH
 from gemini_client import get_client, MODEL_NAME
 from garmin_auth import get_garmin_client
 from workout_builder import build_interval_running_workout, upload_workout
+from context_blocks import insight_memory_block, daily_summary_block
 
 # --- Teil 1: run_readonly_query ---
 TABLE_DESCRIPTIONS = {
@@ -205,24 +206,6 @@ def _table_context_block(cursor):
     return "\n".join(lines)
 
 
-def _insight_memory_block(cursor):
-    row = cursor.execute(
-        "SELECT compressed_text FROM insight_memory_compressed ORDER BY version DESC LIMIT 1"
-    ).fetchone()
-    if not row or not row["compressed_text"]:
-        return "(Kein Eintrag vorhanden.)"
-    return row["compressed_text"]
-
-
-def _todays_daily_summary_block(cursor):
-    today = date.today().isoformat()
-    row = cursor.execute("SELECT * FROM daily_summary WHERE date = ?", (today,)).fetchone()
-    if not row:
-        return f"Für heute ({today}) liegt noch keine daily_summary vor."
-    parts = [f"{k}={row[k]}" for k in row.keys() if k not in ("date", "created_at") and row[k] is not None]
-    return f"HEUTIGE KENNZAHLEN ({today}): " + ", ".join(parts)
-
-
 class ChatEngine:
     """Ein ChatEngine-Objekt = eine Konversation. _turn_counter erhöht sich AUSSCHLIESSLICH in
     send_message() (also nur bei einer echten neuen eingehenden Nutzernachricht, nie innerhalb der
@@ -258,8 +241,8 @@ class ChatEngine:
         system_instruction = SYSTEM_PROMPT_TEMPLATE.format(
             pending_proposals=self._pending_proposals_block(turn_id),
             table_context=_table_context_block(cursor),
-            insight_memory=_insight_memory_block(cursor),
-            todays_summary=_todays_daily_summary_block(cursor),
+            insight_memory=insight_memory_block(cursor),
+            todays_summary=daily_summary_block(cursor, date.today().isoformat()),
         )
         contents = self._load_history_contents(cursor)
         conn.close()
