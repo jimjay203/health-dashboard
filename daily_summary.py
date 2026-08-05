@@ -148,23 +148,60 @@ def _days_until_next_race(cursor, target_date):
     return (date.fromisoformat(row["next_race"]) - date.fromisoformat(target_date)).days
 
 
-def _weight_vs_avg_pct(cursor, target_date):
-    today_row = cursor.execute(
+def _weight_for_date(cursor, target_date):
+    """Neuester Gewichtswert für target_date - Withings bevorzugt (vollständigere Datenquelle,
+    siehe withings_service.py: Garmin bekommt Withings-Messungen nur lückenhaft weitergeleitet),
+    Garmin als Fallback (z.B. Tage vor der Withings-Integration oder ohne Withings-Sync)."""
+    row = cursor.execute(
+        "SELECT weight FROM withings_weigh_ins WHERE date = ? AND weight IS NOT NULL "
+        "ORDER BY timestamp DESC LIMIT 1",
+        (target_date,)
+    ).fetchone()
+    if row:
+        return row["weight"]
+    row = cursor.execute(
         "SELECT weight FROM garmin_weigh_ins WHERE date = ? AND weight IS NOT NULL "
         "ORDER BY timestamp_gmt DESC LIMIT 1",
         (target_date,)
     ).fetchone()
-    if not today_row:
-        return None
-    start, end = _daterange(target_date, WEIGHT_AVG_WINDOW_DAYS, include_end=False)
-    rows = cursor.execute(
-        "SELECT weight FROM garmin_weigh_ins WHERE date >= ? AND date <= ? AND weight IS NOT NULL",
+    return row["weight"] if row else None
+
+
+def _weight_series_for_range(cursor, start, end):
+    """Ein Gewichtswert pro Tag im Bereich [start, end] - Withings bevorzugt, sonst Garmin.
+    Vermeidet Doppelzählung an Tagen, an denen beide Quellen dieselbe physische Messung haben
+    (Garmin leitet Withings-Messungen teilweise weiter) - ohne diese Dedup-Logik würde ein
+    Tag mit beiden Quellen die Baseline doppelt gewichten."""
+    withings_rows = cursor.execute(
+        "SELECT date, weight FROM withings_weigh_ins WHERE date >= ? AND date <= ? "
+        "AND weight IS NOT NULL",
         (start, end)
     ).fetchall()
-    values = [r["weight"] for r in rows]
+    covered_dates = {r["date"] for r in withings_rows}
+    values = [r["weight"] for r in withings_rows]
+
+    garmin_rows = cursor.execute(
+        "SELECT date, weight FROM garmin_weigh_ins WHERE date >= ? AND date <= ? "
+        "AND weight IS NOT NULL",
+        (start, end)
+    ).fetchall()
+    for row in garmin_rows:
+        if row["date"] not in covered_dates:
+            values.append(row["weight"])
+            covered_dates.add(row["date"])
+
+    return values
+
+
+def _weight_vs_avg_pct(cursor, target_date):
+    today_weight = _weight_for_date(cursor, target_date)
+    if today_weight is None:
+        return None
+    start, end = _daterange(target_date, WEIGHT_AVG_WINDOW_DAYS, include_end=False)
+    values = _weight_series_for_range(cursor, start, end)
     if not values:
         return None
-    return _pct_vs_baseline(today_row["weight"], mean(values))
+    return _pct_vs_baseline(today_weight, mean(values))
 
 
 def _data_quality_flag(garmin_row):

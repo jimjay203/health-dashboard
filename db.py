@@ -755,6 +755,28 @@ def init_db():
     )
     """)
 
+    # Withings-Waagen-Daten (siehe withings_service.py) - direkt bei Withings statt über Garmins
+    # lückenhafte Weiterleitung abgeholt. Eigene Tabelle statt Wiederverwendung von
+    # garmin_weigh_ins: andere PK-Domäne (Withings' grpid statt Garmins sample_pk), andere
+    # Spaltenmenge (keine Garmin-eigenen Herleitungen wie visceral_fat/metabolic_age).
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS withings_weigh_ins (
+        grpid INTEGER PRIMARY KEY,
+        date TEXT NOT NULL,
+        weight REAL,
+        body_fat REAL,
+        body_water REAL,
+        bone_mass REAL,
+        muscle_mass REAL,
+        fat_mass_kg REAL,
+        attrib TEXT,
+        timestamp INTEGER
+    )
+    """)
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_withings_weigh_ins_date ON withings_weigh_ins(date)"
+    )
+
     conn.commit()
     conn.close()
 

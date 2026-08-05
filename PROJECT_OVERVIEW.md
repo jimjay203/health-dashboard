@@ -215,6 +215,49 @@ hämmern.
 UPDATE`-Upserts oder Delete+Insert-Zeitreihen-Ersetzung) — sicher gegen Duplikate/Datenverlust,
 siehe Konventionen unten.
 
+## Withings-Integration (`withings_auth.py`/`withings_service.py`)
+
+Garmin bekommt Waagen-Daten von einer Withings-Waage nur lückenhaft weitergeleitet - **live
+verifiziert, kein Verdacht**: für mehrere Tage stand in `garmin_weigh_ins.weight` ein Wert wie
+`82836` statt `82.836` (Faktor 1000, vermutlich ein Einheiten-Bug in Garmins Weiterleitung), exakt
+für die Tage, an denen Withings selbst den korrekten Wert lieferte. Deshalb werden Waagen-Daten
+jetzt zusätzlich **direkt bei Withings** abgeholt (eigene, vollständigere Werte: Körperfett %,
+Muskelmasse, Wasseranteil, Knochenmasse, Fettmasse in kg - Dinge, die Garmin gar nicht oder falsch
+durchreicht).
+
+- **Ground-Truth-Fund, der die Umsetzung verändert hat:** die naheliegende Bibliothek
+  `withings-api` (PyPI) verlangt `pydantic<2`, kollidiert damit hart mit `google-genai`
+  (`pydantic>=2.12.5`) - ein Testinstall im laufenden Container hat `google.genai`
+  tatsächlich unimportierbar gemacht (sofort erkannt und rückgängig gemacht). Withings wird
+  deshalb **ohne SDK**, direkt per `requests` angesprochen - keine neue Abhängigkeit, kein
+  Konflikt. Die exakten Endpunkte/Parameter/Antwortformate wurden trotzdem nicht geraten, sondern
+  aus dem tatsächlich funktionierenden `withings-api`-Quellcode (GitHub) übernommen, nur ohne die
+  Bibliothek selbst zu installieren.
+- **`withings_auth.py`** (Repo-Root, kein `streamlit`-Import): OAuth2-Token-Caching unter
+  `~/.withings_api/credentials.json` (analog zu `garmin_auth.py`s `~/.garminconnect`, geteiltes
+  Docker-Volume `./withings_tokens`). `get_withings_tokens()` refresht abgelaufene Access-Tokens
+  automatisch (Withings gibt bei jedem Refresh einen **neuen** `refresh_token` mit - der alte wird
+  ungültig, daher wird bei jedem Refresh die komplette Datei neu geschrieben). Erst-Autorisierung
+  ist ein einmaliger, zwingend interaktiver Schritt (Nutzer-Login+Zustimmung im Browser) - siehe
+  `examples/withings_authorize.py`.
+- **`withings_service.py`**: `fetch_and_store_withings_data(target_date)` holt Messwerte über
+  `GET wbsapi.withings.net/measure` (bewusst der ältere Pfad ohne `/v2/`-Präfix - exakt der, den
+  die Referenzbibliothek für Messwerte nutzt). Fragt das Zeitfenster einen Tag breiter als nötig
+  an (Withings' `startdate`/`enddate` sind UTC-Unix-Zeitstempel, das lokale Tagesfenster kennt man
+  erst aus der Antwort) und ordnet Messgruppen anhand der von Withings selbst gelieferten
+  `timezone` dem richtigen Kalendertag zu. Messgruppen, bei denen keiner unserer erfassten
+  Messtypen vorkommt (z.B. Herzfrequenz einer Impedanzwaage), werden übersprungen statt als
+  leere Zeile gespeichert.
+- Neue Tabelle `withings_weigh_ins` (PK Withings' `grpid`, eigene Tabelle statt Wiederverwendung
+  von `garmin_weigh_ins` - andere PK-Domäne, andere Spaltenmenge, keine Garmin-eigenen
+  Herleitungen wie `visceral_fat`/`metabolic_age` erfunden).
+- **`daily_summary.py::_weight_vs_avg_pct`**: liest jetzt über `_weight_for_date()`/
+  `_weight_series_for_range()` **Withings bevorzugt, Garmin als Fallback** - pro Tag genau ein
+  Wert (vermeidet Doppelzählung an Tagen, an denen beide Quellen dieselbe physische Messung
+  haben).
+- **Sync-Trigger:** bewusst erstmal nur ein manueller Button in den Streamlit-Settings (wie der
+  Aktivitäten-Sync) - noch nicht Teil des täglichen `auto_sync.py`-Loops.
+
 ## Die vier "Schichten" der KI-Chat-Vorbereitung
 
 Aufbauender Kontext für den Chat (Schicht 4, siehe eigener Abschnitt unten):
@@ -346,13 +389,16 @@ zeigt `tool_calls_json` je Antwort in einem Debug-Expander). CLI-Alternative: `e
 | `context_blocks.py` | Wiederverwendbare Gemini-Kontext-Bausteine, geteilt von chat_engine.py und daily_recommendation.py |
 | `daily_recommendation.py` | Heute-Ansicht: Gemini-generierte Tagesempfehlung inkl. Override-Regenerierung |
 | `training_slots.py` | CRUD für wiederkehrende Vereins-Trainingstermine (club_training_slots) |
+| `withings_auth.py` | Withings-OAuth2-Token-Caching per requests (kein SDK, siehe Ground-Truth-Fund oben) |
+| `withings_service.py` | Holt Withings-Waagen-Messwerte direkt (Körperfett/Muskelmasse/Wasseranteil/Knochenmasse) |
 | `examples/test_workout_builder.py` | Beispiel: einfaches Intervall-Workout (build_interval_running_workout), `python3 -m examples.test_workout_builder` |
 | `examples/test_workout_marathon_tempo.py` | Beispiel: mehrsegmentiges Workout mit Low-Level-Bausteinen |
 | `examples/chat_cli.py` | Terminal-Testskript für chat_engine.py, `python3 -m examples.chat_cli` |
 | `examples/test_auto_sync.py` | Testskript für auto_sync.py: echter API-Ground-Truth-Test + Fake-Orchestrierungstest, `python3 -m examples.test_auto_sync` |
+| `examples/withings_authorize.py` | Einmaliger interaktiver OAuth2-Autorisierungs-Flow, `python3 -m examples.withings_authorize` |
 | `pages/1_🏠_Home.py` | Tagesjournal (löst Journal-Integration aus), Trainingsbereitschaft, Schicht-1/2-Kennzahlen |
 | `pages/2_📊_Health_Trends.py` | Renn-/Workout-Kalender, Endurance-Score, Trends nach Sportart |
-| `pages/3_⚙️_Settings.py` | Sync (Einzel/Backfill), API-Exploration, Aktivitäten-Sync |
+| `pages/3_⚙️_Settings.py` | Sync (Einzel/Backfill), API-Exploration, Aktivitäten-Sync, Withings-Sync |
 | `pages/4_🏃_Aktivitäten.py` | Aktivitäts-Liste/-Filter/-Detailcharts inkl. GPS-Route |
 | `pages/5_🧠_Erkenntnisse.py` | UI für Schicht 3 (Einträge hinzufügen/löschen, aktueller Stand) |
 | `pages/6_🏗️_Workout_Builder.py` | Formular zum Erstellen/Hochladen strukturierter Workouts |
@@ -378,7 +424,8 @@ zeigt `tool_calls_json` je Antwort in einem Debug-Expander). CLI-Alternative: `e
 - **Aktivitäten:** `garmin_activities` (PK `activity_id`), `garmin_activity_details`
   (Sekunden-Zeitreihe), `activity_analytics`
 - **Wochen/Sonstiges:** `weekly_summary` (PK `week_id`), `garmin_weigh_ins` (PK Garmins
-  `sample_pk`), `garmin_personal_records`/`garmin_goals`/`garmin_training_plans` (PK Garmins `id`)
+  `sample_pk`), `withings_weigh_ins` (PK Withings' `grpid`, siehe Withings-Integration-Abschnitt
+  oben), `garmin_personal_records`/`garmin_goals`/`garmin_training_plans` (PK Garmins `id`)
 - **KI-bezogen:** `insight_memory_raw`, `insight_memory_compressed` (append-only), `daily_journal`
   (subjektive Nutzereingaben, PK `date`), `chat_history` (Schicht-4-Konversation, append-only)
 - **Auto-Sync:** `auto_sync_status` (PK `date`, siehe `auto_sync.py`-Abschnitt oben)

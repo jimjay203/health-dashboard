@@ -12,6 +12,9 @@ services:
       # Container-Schicht, ging bei Neuerstellung verloren) - und mit dashboard-v2 teilen, damit
       # dessen Auto-Sync (siehe auto_sync.py) keinen eigenen zweiten Passwort-Login braucht.
       - ./garmin_tokens:/root/.garminconnect
+      # Withings-OAuth2-Token (siehe withings_auth.py) - nur hier gemountet, der manuelle
+      # Withings-Sync-Button läuft ausschließlich im Streamlit-Service, noch nicht in dashboard-v2.
+      - ./withings_tokens:/root/.withings_api
     environment:
       - PYTHONUNBUFFERED=1
     restart: unless-stopped

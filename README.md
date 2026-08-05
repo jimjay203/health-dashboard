@@ -15,7 +15,8 @@ Gebaut als Streamlit-Multi-Page-App, per Docker Compose deploybar.
 - **🏃 Aktivitäten**: manueller Sync von Läufen/Rad/Schwimmen inkl. optionaler Sekunden-Detail-Zeitreihen (GPS/HF/Leistung), Filter, Detailcharts und GPS-Route
 - **🏗️ Workout Builder**: strukturierte Intervall-Lauf-Workouts (Warmup/Intervalle/Erholung/Cooldown) per Formular erstellen und direkt zu Garmin Connect hochladen, Pace-Ziele aus den aktuellen Trainingszonen
 - **💬 Chat** (Gemini, `chat_engine.py`): beantwortet Fragen zu den Trainingsdaten (Whitelist-SQL-Zugriff auf die regelbasierten Auswertungen) und kann Workouts vorschlagen/hochladen — Vorschlag und Upload sind strukturell auf zwei getrennte Nachrichten aufgeteilt, kein automatisches Verketten
-- **⚙️ Settings**: Einzel-Sync, Zeitraum-Backfill, Aktivitäten-Sync sowie eine API-Explorationsfunktion, die alle relevanten Garmin-Endpunkte einmal testweise abruft und die rohen JSON-Antworten anzeigt/speichert
+- **⚙️ Settings**: Einzel-Sync, Zeitraum-Backfill, Aktivitäten-Sync, Withings-Sync sowie eine API-Explorationsfunktion, die alle relevanten Garmin-Endpunkte einmal testweise abruft und die rohen JSON-Antworten anzeigt/speichert
+- **⚖️ Withings-Integration**: holt Waagen-Daten (Gewicht, Körperfett %, Muskelmasse, Wasseranteil, Knochenmasse, Fettmasse) direkt bei Withings statt über Garmins lückenhafte/teils fehlerhafte Weiterleitung (live bestätigt: falsche Gewichtseinheit an mehreren Tagen). Eigene OAuth2-Anbindung ohne SDK (Bibliothekskonflikt mit Gemini vermieden), fließt bevorzugt in die Gewichts-Baseline ein, Garmin bleibt Fallback für Tage ohne Withings-Daten.
 - **🧪 FastAPI+React-Rebuild**: paralleler zweiter Container (`dashboard-v2`, Port 8000) mit FastAPI-Backend + React/TypeScript-Frontend, perspektivischer Ersatz für das Streamlit-Dashboard (aktuell noch nicht vollständig). Enthält bereits die **Heute-Ansicht**: Readiness-Dial, Gemini-generierte Tagesempfehlung mit Begründung (eigene Empfehlungs-Engine, getrennt vom Erkenntnis-Gedächtnis) inkl. Override ("fühle mich schlechter/besser" → sofortige Neugenerierung mit Zusatzkontext), vier Metrik-Kacheln mit Sparklines (HRV, Schlaf, Body Battery, Ruhepuls) und ein Wochenstreifen (fertig absolviert/Vereinstermin/Rennen/Ruhetag, konfigurierbare wiederkehrende Vereins-Trainingstermine über eine eigene Einstellungs-Ansicht im neuen Frontend).
 - **🌙 Automatischer Sync-Trigger**: Hintergrund-Task im `dashboard-v2`-Container prüft ab 06:00 alle 25 Min. leichtgewichtig, ob die heutigen Schlafdaten vorliegen, und löst dann automatisch den vollen Tages-Sync sowie die Tagesempfehlung (s.o.) aus — kein manuelles Anstoßen morgens mehr nötig. Bricht ohne Treffer um 12:00 sichtbar ab (`GET /api/sync-status`). Der manuelle Settings-Button bleibt unverändert als Fallback bestehen.
 
@@ -24,6 +25,7 @@ Gebaut als Streamlit-Multi-Page-App, per Docker Compose deploybar.
 - [Streamlit](https://streamlit.io/) (Multi-Page App)
 - SQLite (über `sqlite3`, kein ORM)
 - [garminconnect](https://github.com/cyberjunky/python-garminconnect) für den Garmin-API-Zugriff
+- Withings-API direkt per `requests` (kein SDK - Bibliothekskonflikt mit `google-genai` vermieden, siehe PROJECT_OVERVIEW.md)
 - [google-genai](https://github.com/googleapis/python-genai) (Gemini) für Erkenntnis-Gedächtnis und Chat
 - Plotly/pydeck für Charts & Karten
 - Docker Compose für den Betrieb
@@ -53,9 +55,16 @@ GARMIN_PASSWORD=dein-passwort
 
 # Google Gemini API Key (aus Google AI Studio)
 GEMINI_API_KEY=dein-api-key
+
+# Withings (aus dem Withings-Entwicklerportal, https://developer.withings.com)
+WITHINGS_CLIENT_ID=...
+WITHINGS_CLIENT_SECRET=...
+WITHINGS_REDIRECT_URI=...
 ```
 
 > Die Garmin-Zugangsdaten werden nur für den *ersten* Login benötigt — danach übernimmt `garmin_auth.py` das Token-Caching unter `~/.garminconnect`, sodass kein wiederholter Passwort-Login (und damit kein unnötiges 429-Rate-Limit-Risiko) entsteht.
+
+> Withings braucht zusätzlich einen einmaligen interaktiven Autorisierungs-Schritt (Browser-Login + Zustimmung) - siehe Schritt 3 unten. Die Redirect-URI muss exakt der im Withings-Entwicklerportal hinterlegten entsprechen, muss aber selbst nicht erreichbar sein (der Code wird manuell aus der Adresszeile kopiert).
 
 ### 2. Starten
 
@@ -73,6 +82,7 @@ In der App unter **⚙️ Settings**:
 1. Einzel-Sync für heute ausführen (Login + erste Datenbefüllung)
 2. Optional: Backfill über einen Zeitraum starten, um Historie nachzuladen
 3. Optional: Aktivitäten-Sync starten (Läufe/Rad/Schwimmen, bewusst manuell/getrennt vom Tages-Sync)
+4. Optional: Withings-Waage anbinden - einmalig `docker exec -it health_dashboard python3 -m examples.withings_authorize` ausführen (Browser-Autorisierung, siehe Skript-Ausgabe), danach den Withings-Sync-Button in den Settings nutzen
 
 ### Deployment aktualisieren
 
@@ -89,7 +99,7 @@ app.py                       # Streamlit-Einstiegspunkt / Navigation
 pages/
   1_🏠_Home.py                # Tagesübersicht, Journal
   2_📊_Health_Trends.py       # Kalender & historische Trends
-  3_⚙️_Settings.py            # Sync, Backfill, API-Exploration, Aktivitäten-Sync
+  3_⚙️_Settings.py            # Sync, Backfill, API-Exploration, Aktivitäten-Sync, Withings-Sync
   4_🏃_Aktivitäten.py         # Aktivitäts-Liste, Filter, Detailcharts, GPS-Route
   5_🧠_Erkenntnisse.py        # UI fürs Erkenntnis-Gedächtnis
   6_🏗️_Workout_Builder.py     # Formular zum Erstellen/Hochladen strukturierter Workouts
@@ -112,7 +122,9 @@ context_blocks.py             # Gemeinsame Gemini-Kontext-Bausteine (chat_engine
 auto_sync.py                  # Automatischer Sync-Trigger via Schlafdaten-Checker (läuft im dashboard-v2-Container)
 daily_recommendation.py       # Heute-Ansicht: Gemini-generierte Tagesempfehlung inkl. Override
 training_slots.py             # CRUD für wiederkehrende Vereins-Trainingstermine
-examples/                    # Eigenständige Nutzungsbeispiele (kein UI), z.B. für workout_builder.py/chat_engine.py/auto_sync.py
+withings_auth.py              # Withings-OAuth2-Token-Caching (kein SDK, direkt per requests)
+withings_service.py           # Holt Withings-Waagen-Messwerte direkt (Körperfett/Muskelmasse/...)
+examples/                    # Eigenständige Nutzungsbeispiele (kein UI), z.B. für workout_builder.py/chat_engine.py/auto_sync.py/withings_authorize.py
 backend/                     # FastAPI-Rebuild (main.py, routers/, eigenes Dockerfile+requirements.txt)
 frontend/                    # React/TypeScript/Vite-Frontend (Heute-Ansicht, Vereins-Slot-Einstellungen)
 ```
@@ -127,3 +139,4 @@ Ein technischer Gesamtüberblick (Architektur, Konventionen, Datenbank-Kategorie
 - Garmins Rate-Limit (429) ist real und wird ernst genommen: alle Sync-Pfade brechen bei einem 429 sofort ab, statt es erneut zu versuchen.
 - Der `dashboard-v2`-Container (FastAPI+React) teilt sich die SQLite-Datei mit dem Streamlit-Container über ein gemeinsames `./data`-Volume-Mount, nicht das ganze Repo. Seit dem automatischen Sync-Trigger schreibt er auch (ein voller Sync pro Tag) — bislang unkritisch beobachtet, bei künftigen Problemen wäre SQLites WAL-Modus die Standardlösung.
 - `dashboard` und `dashboard-v2` teilen sich außerdem den Garmin-Session-Token-Cache über `./garmin_tokens:/root/.garminconnect`, damit der automatische Sync-Trigger keinen eigenen, zweiten Passwort-Login braucht.
+- Withings-Tokens liegen unter `./withings_tokens:/root/.withings_api` (nur im `dashboard`-Service gemountet, da der Withings-Sync aktuell nur dort läuft) und sind wie `garmin_tokens/` bewusst in `.gitignore`/`.dockerignore`.

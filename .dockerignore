@@ -1,6 +1,7 @@
 .git
 data/
 garmin_tokens/
+withings_tokens/
 garmin_api_exploration/
 frontend/node_modules
 frontend/dist

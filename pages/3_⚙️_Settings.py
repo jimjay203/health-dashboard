@@ -5,6 +5,7 @@ from garmin_service import fetch_and_store_garmin_data
 from garmin_backfill import run_backfill
 from garmin_explore import run_exploration
 from garmin_activities import sync_activity_list, sync_activity_details
+from withings_service import fetch_and_store_withings_data
 from db import init_db, get_connection
 
 st.set_page_config(page_title="Einstellungen & Data Engine", page_icon="⚙️")
@@ -32,6 +33,39 @@ with col2:
                 st.json(data)
             except Exception as e:
                 st.error(f"Fehler beim Sync: {e}")
+
+st.divider()
+
+st.subheader("⚖️ Withings Sync")
+st.caption(
+    "Holt Waagen-Daten direkt bei Withings statt über Garmins lückenhafte Weiterleitung "
+    "(Körperfett %, Muskelmasse, Wasseranteil, Knochenmasse, Fettmasse). Erstmalige Nutzung "
+    "erfordert eine einmalige Autorisierung über `python3 -m examples.withings_authorize`. "
+    "Bewusst nur manuell hier anstoßbar, noch nicht Teil des automatischen Tages-Syncs."
+)
+
+wi_col1, wi_col2 = st.columns([2, 1])
+
+with wi_col1:
+    withings_sync_date = st.date_input(
+        "Datum für Withings-Sync wählen", value=date.today(), key="withings_sync_date"
+    )
+
+with wi_col2:
+    st.write("")  # Spacer
+    st.write("")
+    if st.button("Withings synchronisieren ⚖️"):
+        with st.spinner("Lade Daten von Withings..."):
+            try:
+                count = fetch_and_store_withings_data(withings_sync_date.isoformat())
+                if count:
+                    st.success(f"{count} Messung(en) für {withings_sync_date} gespeichert!")
+                else:
+                    st.warning(f"Keine Withings-Messungen für {withings_sync_date} gefunden.")
+            except ValueError as e:
+                st.error(str(e))
+            except Exception as e:
+                st.error(f"Fehler beim Withings-Sync: {e}")
 
 st.divider()
 
