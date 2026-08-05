@@ -5,10 +5,11 @@ import {
   createClubSlot,
   deleteClubSlot,
   SPORT_TYPES,
-  SPORT_TYPE_EMOJI,
+  SPORT_TYPE_ICON,
   type ClubSlot,
   type ClubSlotInput,
 } from "./api";
+import Icon from "./Icon";
 
 const WEEKDAY_LABELS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"];
 
@@ -54,7 +55,7 @@ function ClubSlotsSettings() {
 
   return (
     <div className="card club-slots-settings">
-      <h2>Vereins-Trainingstermine</h2>
+      <h3>Vereins-Trainingstermine</h3>
       {error && <p className="error-banner">Fehler: {error}</p>}
 
       <table className="club-slots-table">
@@ -74,7 +75,7 @@ function ClubSlotsSettings() {
             <tr key={slot.id}>
               <td>{WEEKDAY_LABELS[slot.weekday]}</td>
               <td>
-                {SPORT_TYPE_EMOJI[slot.sport_type]} {slot.sport_type}
+                <Icon name={SPORT_TYPE_ICON[slot.sport_type]} /> {slot.sport_type}
               </td>
               <td>{slot.label}</td>
               <td>{slot.valid_from}</td>
@@ -108,9 +109,10 @@ function ClubSlotsSettings() {
           value={form.sport_type}
           onChange={(e) => setForm({ ...form, sport_type: e.target.value as ClubSlotInput["sport_type"] })}
         >
+          {/* <option> kann nur Text enthalten, kein Icon-Element - hier bewusst nur der Name. */}
           {SPORT_TYPES.map((sportType) => (
             <option key={sportType} value={sportType}>
-              {SPORT_TYPE_EMOJI[sportType]} {sportType}
+              {sportType}
             </option>
           ))}
         </select>

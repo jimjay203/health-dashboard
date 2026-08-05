@@ -270,22 +270,64 @@ Ziel-Intensitätsverteilung) - Signal-Sammlung ist klar von der Gemini-Aufruf-Lo
 sich weitere Signale später nachrüsten lassen.
 
 **Vier Kalender-Ebenen** im Frontend (`WeeklyCalendarWidget.tsx`), zunehmend gröber je weiter in
-der Zukunft: **Diese Woche** (konkret, mit Workout-Entwürfen, Gemini-generiert), **Nächste Woche**
-und **Übernächste Woche** (beide nach denselben Regeln: nur eine kurze Tages-Andeutung je Sportart
-als Emoji statt Wort - bewusst kompakt, keine Workout-Details, kein Gemini-Call - siehe
-`get_week_outlook()` unten), **ab Woche 4** (ein Balken pro Woche bis einschließlich der Woche des
-nächsten Rennens, die letzte Zeile benennt Wettkampf + Datum statt nur der Trainingsphase - siehe
-`get_far_weeks_outlook()` unten). Jeder Tag zeigt zusätzlich sein Kalenderdatum, jede
-Wochen-Überschrift die ISO-Kalenderwoche (KW) + Datumsbereich (`formatShortDate()` in `api.ts` -
-reines String-Slicing auf dem bereits bekannten ISO-Datum, kein `new Date(isoString)`, siehe
-Datums-Konvention weiter unten).
+der Zukunft: **Diese Woche** (volle Detailtiefe, mit Workout-Entwürfen), **Nächste Woche** und
+**Übernächste Woche** (dieselbe echte, Gemini-generierte `weekly_plan`-Datengrundlage wie "Diese
+Woche" - der Sonntags-Trigger bereitet sie ohnehin vor, siehe unten - aber reduziert dargestellt:
+Icon + kurzes Stichwort ohne Klammer-Begründung, eine auf Viertel-/Halbstunden-Schritte gerundete
+Dauer statt exakter Werte, keine Zone/Distanz, keine Action-Buttons), **ab Woche 4** (ein Balken
+pro Woche bis einschließlich der Woche des nächsten Rennens, die letzte Zeile benennt Wettkampf +
+Datum statt nur der Trainingsphase - siehe `get_far_weeks_outlook()` unten). Jeder Tag zeigt
+zusätzlich sein Kalenderdatum, jede Wochen-Überschrift die ISO-Kalenderwoche (KW) + Datumsbereich
+(`formatShortDate()` in `api.ts` - reines String-Slicing auf dem bereits bekannten ISO-Datum, kein
+`new Date(isoString)`, siehe Datums-Konvention weiter unten).
 
-- **Nächste Woche zeigt bewusst keinen konkreten Plan mehr** (frühere Version tat das) - der
-  konkrete Gemini-Plan inkl. Workout-Entwürfen wird trotzdem weiterhin vom Sonntags-Trigger zwei
-  Sonntage im Voraus vorbereitet (siehe unten), nur eben erst angezeigt/nutzbar, sobald diese Woche
-  zu "Diese Woche" wird - dadurch ist der Plan am Montagmorgen sofort da, ohne Lazy-Generierung
-  live im Request. Die frühzeitige Generierung ist also weiterhin sinnvoll, obwohl sie nicht mehr
-  zwei Wochen im Voraus sichtbar ist.
+- **Bugfix - Trainingsphase pro Woche einzeln berechnet:** "Nächste Woche"/"Übernächste Woche"
+  zeigten anfangs fälschlich dieselbe Phase wie "Diese Woche" (ein einziger, geteilter `phase`-Wert
+  wurde an alle Tiers durchgereicht). `get_week_phase(reference_date)` (neu in `weekly_planner.py`,
+  Kernlogik in `_week_phase(cursor, week_start)` für interne Wiederverwendung) berechnet die Phase
+  jetzt **pro Woche einzeln**, anhand des **eigenen Wochenstarts** dieser Woche als Referenz für
+  die "nächstes Rennen ab hier"-Suche (`weekly_summary.py::_days_until_next_race()` wiederverwendet,
+  nicht dupliziert) - Taper/Peak wie gehabt datumsbasiert projizierbar; jenseits beider Schwellen
+  bewusst **"Build" als Default** (anders als `get_far_weeks_outlook()`, das dort `None` zeigt - für
+  den nahen Horizont von Woche 2-3 ist "Aufbauwoche" eine vernünftige Standardannahme, für den viel
+  unsichereren Horizont ab Woche 4 nicht). `WeeklyPlanResponse` bekam dafür ein `training_phase`-
+  Feld, das jede der drei Wochen-Ebenen für ihre eigene Woche abfragt. Live verifiziert: KW32
+  (Diese Woche) Taper, KW33 (Nächste Woche) Build, KW34 (Übernächste Woche) Peak.
+- **Bugfix/Erweiterung - Phase beeinflusst jetzt tatsächlich die generierten Inhalte:** vor diesem
+  Fix bekam das Modell die Trainingsphase gar nicht explizit mitgeteilt (nur indirekt über den
+  Renn-Countdown erschließbar) - aufeinanderfolgende Wochen mit unterschiedlicher Phase erzeugten
+  dadurch nahezu wortgleiche Vorschläge (z.B. identischer Long Run in einer Build- und einer
+  Peak-Woche). Neuer Kontext-Block `_training_phase_block()` nennt die Phase jetzt explizit samt
+  konkreter Handlungsanweisung (`PHASE_GUIDANCE`-Dict: Build = Umfang/Long-Run gezielt steigern,
+  Peak = renn-spezifische Tempoabschnitte einbauen, Taper = Umfang reduzieren, Base = durchgehend
+  Zone 1-2), SYSTEM_PROMPT verlangt jetzt explizit erkennbare Unterschiede zwischen Wochen
+  unterschiedlicher Phase. Live verifiziert: KW33 (Build) generierte einen 120min/20km
+  Zone-2-Dauerlauf, KW34 (Peak) einen 130min/22km langen Lauf **mit Marathon-Pace-Intervallen** in
+  Zone 3 - klar unterscheidbare, nachvollziehbare Progression statt der vorherigen fast identischen
+  Vorschläge.
+- **Erweiterung - Kern- vs. flexible Einheiten (`is_key_session`):** neue optionale
+  `weekly_plan`-Spalte (`NULL` = Wettkampftag/nicht bewertbar, sonst vom Modell im selben
+  Gemini-Aufruf mitgeneriert, kein zusätzlicher Call). Einstufungskriterien bewusst phasenabhängig
+  statt hart an Sportart/Session-Typ festgemacht (siehe SYSTEM_PROMPT): der lange Lauf/die
+  renn-spezifische Qualitätseinheit ist in Build-/Peak-Wochen meist Kern, in Base-Wochen oder weit
+  vor dem Rennen oft flexibler; Regenerations-/Technik-Einheiten sind unabhängig von der Phase in
+  aller Regel flexibel; auch feste Vereinstermine können Kern sein, wenn die Phase genau darauf
+  aufbaut (z.B. Bahntraining in einer Intervall-fokussierten Phase) - vom Modell eingeschätzt, nicht
+  hart verdrahtet. Visuell zurückhaltend umgesetzt: in der reduzierten Ansicht (Nächste/Übernächste
+  Woche) wird die komplette Tages-Karte (Icon+Stichwort+Dauer) in Akzentfarbe statt der gedämpften
+  Sekundärfarbe dargestellt; in "Diese Woche" ein dezentes Badge (⭐ Kern-Einheit), gleicher Stil wie
+  das bestehende "✅ Hochgeladen"-Badge.
+- **Nächste Woche zeigt wieder die echte, Gemini-generierte `weekly_plan`-Datengrundlage** (eine
+  frühere Zwischenversion hatte "Nächste Woche"/"Übernächste Woche" testweise auf eine rein
+  heuristische, phasen-blinde "häufigstes historisches Muster"-Andeutung umgestellt
+  (`get_week_outlook()`/`_typical_weekday_pattern()`, kein Gemini-Call) - das erklärte auch, warum
+  KW33/KW34 zuvor wortgleiche Inhalte zeigten: die Heuristik kennt gar keine Wochen-/Phasen-
+  Unterscheidung, sondern liefert für einen Wochentag immer dasselbe historische Muster. Diese
+  Funktionen wurden wieder entfernt (inkl. `GET /api/week-outlook/{date}` und `GET
+  /api/training-outlook`, siehe unten) - der konkrete Gemini-Plan inkl. Workout-Entwürfen wird vom
+  Sonntags-Trigger ohnehin zwei Sonntage im Voraus vorbereitet (siehe unten), jetzt wird er auch
+  direkt (reduziert) angezeigt, statt ungenutzt in der DB zu liegen, bis die Woche zu "Diese Woche"
+  wird.
 
 - **Ground-Truth-Fund:** `weekly_summary` wird ausschließlich rückwirkend befüllt (ein
   Wochen-Eintrag entsteht erst, sobald mind. ein Tag dieser Woche synchronisiert wurde) - für die
@@ -354,21 +396,14 @@ Datums-Konvention weiter unten).
   ohne `schedule_date` - nur Upload ohne Termin). Reine Logik-Änderung, der Button heißt weiterhin
   "Hochladen".
 - **`backend/routers/weekly_plan.py`**: `GET /api/weekly-plan/{date}` (Cache-dann-Lazy-Generieren,
-  gleiches Muster wie `GET /api/daily-recommendation/{date}` - bedient nur noch "Diese Woche"),
-  `GET /api/week-outlook/{date}` (bedient sowohl "Nächste Woche" als auch "Übernächste Woche" -
-  beide nach denselben Regeln, ruft `weekly_planner.py::get_week_outlook()` auf - **kein
-  Gemini-Call**: Club-Slot-Tage nutzen die feste Sportart + einen kurzen `typical_character`-
-  Auszug, freie Tage nutzen das häufigste eigene Muster dieses Wochentags aus der `weekly_plan`-
-  Historie, ehrlicher als eine frisch spekulierende Modell-Antwort für einen so unsicheren
-  Horizont), `GET /api/workout-draft/{date}`, `POST /api/workout-draft/{draft_id}/upload`,
-  `GET /api/training-outlook` (aktuellste `weekly_summary.training_phase` +
-  `days_until_next_race` - liefert die Trainingsphase, die als Zusatz-Hinweis in den
-  Überschriften von Woche 1-3 angezeigt wird; "nächster Wettkampf" ist bewusst einfach das
-  nächste Rennen aus `garmin_scheduled_events`, Garmin liefert keine A/B/C-Priorität, siehe
-  dortiger Schema-Check), `GET /api/far-weeks-outlook/{date}` (ab Woche 4, siehe
-  `get_far_weeks_outlook()` unten - `week_id`/`week_start`/`week_end`/`weekly-plan`- und
-  `week-outlook`-Response bekamen dafür ebenfalls ein `week_id`-Feld auf oberster Ebene, per
-  `d.isocalendar()`).
+  gleiches Muster wie `GET /api/daily-recommendation/{date}` - bedient jetzt alle drei konkreten
+  Wochen-Ebenen: Diese/Nächste/Übernächste Woche, inkl. `week_id`/KW und per `get_week_phase()`
+  berechneter `training_phase`), `GET /api/workout-draft/{date}`, `POST /api/workout-draft/
+  {draft_id}/upload`, `GET /api/far-weeks-outlook/{date}` (ab Woche 4, siehe
+  `get_far_weeks_outlook()` unten). Die früheren Endpoints `GET /api/week-outlook/{date}` und `GET
+  /api/training-outlook` wurden entfernt (siehe "Nächste Woche zeigt wieder..." oben) - "nächster
+  Wettkampf" bleibt weiterhin bewusst einfach das nächste Rennen aus `garmin_scheduled_events`,
+  Garmin liefert keine A/B/C-Priorität, siehe dortiger Schema-Check.
 - **`get_far_weeks_outlook(reference_date)`** (neu in `weekly_planner.py`): iteriert wochenweise
   von Woche 4 (3 Wochen nach der Woche von `reference_date`) bis zur Woche des nächsten Rennens ab
   diesem Punkt (`garmin_scheduled_events.event_date >= week4_start`, `ORDER BY event_date ASC LIMIT
@@ -387,15 +422,16 @@ Datums-Konvention weiter unten).
   (07.-13.09.2026), der Woche des SWB Marathon Bremen am 13.09.2026, letzter Balken zeigt
   "swb-Marathon Bremen (13.09.)" statt einer Trainingsphase - exakt wie erwartet.
 - **Frontend:** `WeeklyCalendarWidget.tsx` ersetzt die bisherigen `TomorrowCard`/`WeekStripView`-
-  Sektionen in `TodayView.tsx` durch die vier oben beschriebenen Ebenen. "Nächste Woche" und
-  "Übernächste Woche" zeigen die Sportart als Emoji statt als Wort (`outlookIcon()`) und nur einen
-  kurzen Zusatz-Text ohne die Sportart-Wiederholung (`outlookDetail()` - schneidet das äußere
-  Klammernpaar aus dem vom Backend gelieferten `hint`-Text, robust auch bei verschachtelten Klammern
-  im `session_hint`, z.B. "Langer Lauf (Marathon-Vorbereitung)"), bewusst kompakteres Padding als
-  die "Diese Woche"-Karte. `daily_recommendation.py::_gather_context` bekommt einen neuen
-  `weekly_plan_block`-Baustein (in `context_blocks.py`, geteilt) - prüft zuerst, ob heute ein
-  Club-Slot ist (dann kein zusätzlicher Wochenplan-Kontext nötig), sonst der generierte
-  Wochenplan-Vorschlag für heute.
+  Sektionen in `TodayView.tsx` durch die vier oben beschriebenen Ebenen, alle auf derselben
+  `fetchWeeklyPlan()`-Datengrundlage. `PlanDay` (volle Detailtiefe, "Diese Woche") und
+  `CompactPlanDay` (reduziert, Nächste/Übernächste Woche) sind zwei getrennte Komponenten auf
+  demselben `WeeklyPlanDay`-Typ; `shortSessionLabel()` schneidet für die kompakte Ansicht die
+  Klammer-Begründung vom `session_type`-Text ab (`"Langer Lauf (Marathon-Vorbereitung)"` ->
+  `"Langer Lauf"`), `roundedDurationLabel()` (in `api.ts`) rundet `target_duration_minutes` auf
+  eine feste Viertel-/Halbstunden-Leiter (20/30/45min, dann 30min-Schritte). `daily_recommendation.
+  py::_gather_context` bekommt einen neuen `weekly_plan_block`-Baustein (in `context_blocks.py`,
+  geteilt) - prüft zuerst, ob heute ein Club-Slot ist (dann kein zusätzlicher Wochenplan-Kontext
+  nötig), sonst der generierte Wochenplan-Vorschlag für heute.
 
 ## Die vier "Schichten" der KI-Chat-Vorbereitung
 
@@ -548,7 +584,7 @@ zeigt `tool_calls_json` je Antwort in einem Debug-Expander). CLI-Alternative: `e
 | `backend/routers/sync_status.py` | `GET /api/sync-status`, `POST /api/sync-trigger` (siehe auto_sync.py) |
 | `backend/routers/today.py` | Heute-Ansicht: readiness/trends/daily-recommendation/daily-override/week-strip (5 Endpoints) |
 | `backend/routers/club_slots.py` | CRUD auf /api/club-slots (siehe training_slots.py) |
-| `backend/routers/weekly_plan.py` | Wochenplaner-Endpoints: weekly-plan/week-outlook/workout-draft/training-outlook/far-weeks-outlook (siehe weekly_planner.py) |
+| `backend/routers/weekly_plan.py` | Wochenplaner-Endpoints: weekly-plan (Diese/Nächste/Übernächste Woche)/workout-draft/far-weeks-outlook (siehe weekly_planner.py) |
 | `frontend/src/App.tsx` | Ansichtsumschalter (Heute/Einstellungen), kein Routing |
 | `frontend/src/TodayView.tsx` | Heute-Ansicht: Readiness-Dial, Empfehlungs-Panel, Metrik-Kacheln, Kalender-Widget |
 | `frontend/src/WeeklyCalendarWidget.tsx` | Rolling-Horizon-Kalender: Diese Woche/Nächste Woche/Wochen 3-4 |
@@ -575,7 +611,8 @@ zeigt `tool_calls_json` je Antwort in einem Debug-Expander). CLI-Alternative: `e
   (PK `id` AUTOINCREMENT, mit optionaler `typical_character`-Spalte, siehe "Heute-Ansicht"- bzw.
   "Rolling-Horizon-Wochenplaner"-Abschnitt oben)
 - **Wochenplaner:** `weekly_plan` (PK `date`, eine Zeile pro Tag statt pro Woche - siehe
-  Begründung im "Rolling-Horizon-Wochenplaner"-Abschnitt oben), `weekly_plan_workout_draft`
+  Begründung im "Rolling-Horizon-Wochenplaner"-Abschnitt oben; `is_key_session INTEGER` als
+  nachträglich ergänzte Spalte, `NULL` = Wettkampftag/nicht bewertbar), `weekly_plan_workout_draft`
   (PK `id` AUTOINCREMENT, speichert Builder-Name+Parameter statt eines Workout-Objekts)
 
 ## Wichtige Konventionen

@@ -4,27 +4,25 @@ import {
   nextMondayIso,
   weekAfterNextMondayIso,
   formatShortDate,
+  roundedDurationLabel,
   fetchWeeklyPlan,
-  fetchWeekOutlook,
   fetchWorkoutDraft,
   uploadWorkoutDraft,
-  fetchTrainingOutlook,
   fetchFarWeeksOutlook,
   workoutBuilderUrl,
-  SPORT_TYPE_EMOJI,
+  SPORT_TYPE_ICON,
   type SportType,
   type WeeklyPlan,
   type WeeklyPlanDay,
-  type WeekOutlook,
   type WorkoutDraft,
-  type TrainingOutlook,
   type FarWeekBar,
 } from "./api";
+import Icon from "./Icon";
 
 const WEEKDAY_LABELS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 
 function isSportType(value: string | null): value is SportType {
-  return value !== null && value in SPORT_TYPE_EMOJI;
+  return value !== null && value in SPORT_TYPE_ICON;
 }
 
 // week_id ist "YYYY-Wnn" (siehe weekly_planner.py::_week_bounds) - reines String-Splitting statt
@@ -35,34 +33,19 @@ function isoWeekNumber(weekId: string): string {
 
 // weekly_plan.sport_type ist Freitext vom Gemini-Modell, aber per System-Prompt auf exakt die
 // SPORT_TYPES-Werte beschränkt (siehe weekly_planner.py) - Fallback nur als Sicherheitsnetz.
-function planDayIcon(day: { sport_type: string | null; source: string | null }): string {
-  if (day.source === "race") return "🏁";
-  if (isSportType(day.sport_type)) return SPORT_TYPE_EMOJI[day.sport_type];
-  return day.sport_type ? "🏃" : "😴";
+// Gibt einen Material-Symbols-Icon-Namen zurück (siehe Icon.tsx), keinen Emoji-Zeichen mehr.
+function planDayIconName(day: { sport_type: string | null; source: string | null }): string {
+  if (day.source === "race") return "flag";
+  if (isSportType(day.sport_type)) return SPORT_TYPE_ICON[day.sport_type];
+  return day.sport_type ? "directions_run" : "bedtime";
 }
 
-// Nächste/Übernächste Woche zeigen die Sportart als Emoji statt als Wort (kompaktere Zeilen) -
-// gleiche Icon-Logik wie planDayIcon, nur anhand des hint-Texts statt eines source-Felds, da
-// WeekOutlookDay kein source hat (siehe get_week_outlook()).
-function outlookIcon(day: { sport_type: string | null; hint: string | null }): string {
-  if (day.hint?.startsWith("Wettkampf:")) return "🏁";
-  if (isSportType(day.sport_type)) return SPORT_TYPE_EMOJI[day.sport_type];
-  return day.sport_type ? "🏃" : "😴";
-}
-
-// hint kommt vom Backend als vollständiger Satz ("Laufen (Longrun)", "Wettkampf: <Titel>") - das
-// Icon deckt die Sportart bereits ab (outlookIcon), hier nur noch der kurze Zusatz-Teil, damit die
-// Zeile so schlank wie möglich bleibt. Backend umschließt den Zusatz-Teil immer mit genau einem
-// äußeren Klammernpaar (f"{sport_type} ({session_hint})", siehe get_week_outlook()) - deshalb nur
-// das äußere Klammernpaar abschneiden statt mit einer Regex nach "(...)" zu suchen, da session_hint
-// selbst verschachtelte Klammern enthalten kann (z.B. "Laufen (Langer Lauf (Marathon-Vorbereitung))").
-function outlookDetail(day: { sport_type: string | null; hint: string | null }): string | null {
-  if (!day.hint) return null;
-  if (day.hint.startsWith("Wettkampf: ")) return day.hint.slice("Wettkampf: ".length);
-  if (!day.sport_type || !day.hint.startsWith(day.sport_type)) return null;
-  const rest = day.hint.slice(day.sport_type.length).trim();
-  if (!rest.startsWith("(") || !rest.endsWith(")")) return null;
-  return rest.slice(1, -1);
+// Reduzierte Ansicht (Nächste/Übernächste Woche): nur das kurze Stichwort, ohne die
+// Klammer-Erklärung/Begründung dahinter (z.B. "Langer Lauf (Marathon-Vorbereitung)" ->
+// "Langer Lauf") - die gehört in die fixierte Woche, nicht in die grobe Vorschau.
+function shortSessionLabel(day: { session_type: string | null; sport_type: string | null }): string {
+  const text = day.session_type ?? (day.sport_type ? day.sport_type : "Ruhetag");
+  return text.split("(")[0].trim();
 }
 
 function PlanDay({ day }: { day: WeeklyPlanDay }) {
@@ -105,7 +88,9 @@ function PlanDay({ day }: { day: WeeklyPlanDay }) {
       <div className="plan-day-weekday">
         {WEEKDAY_LABELS[day.weekday]} <span className="plan-day-date">{formatShortDate(day.date)}</span>
       </div>
-      <div className="plan-day-icon">{planDayIcon(day)}</div>
+      <div className="plan-day-icon">
+        <Icon name={planDayIconName(day)} />
+      </div>
       <div className="plan-day-session">{day.session_type ?? (day.sport_type ? day.sport_type : "Ruhetag")}</div>
       {(detail.length > 0 || day.target_zone) && (
         <div className="plan-day-detail">
@@ -113,10 +98,17 @@ function PlanDay({ day }: { day: WeeklyPlanDay }) {
           {day.target_zone && ` · Zone ${day.target_zone}`}
         </div>
       )}
+      {day.is_key_session && (
+        <div className="plan-day-key-badge">
+          <Icon name="star" /> Kern-Einheit
+        </div>
+      )}
       {draft?.id != null && (
         <div className="plan-day-actions">
           {draft.uploaded ? (
-            <span className="plan-day-uploaded">✅ Hochgeladen</span>
+            <span className="plan-day-uploaded">
+              <Icon name="check_circle" /> Hochgeladen
+            </span>
           ) : (
             <button disabled={uploading} onClick={handleUpload}>
               {uploading ? "…" : "Hochladen"}
@@ -132,10 +124,10 @@ function PlanDay({ day }: { day: WeeklyPlanDay }) {
   );
 }
 
-function PlanWeekTier({ title, plan, phase }: { title: string; plan: WeeklyPlan | null; phase: string | null }) {
+function PlanWeekTier({ title, plan }: { title: string; plan: WeeklyPlan | null }) {
   return (
-    <div className="card calendar-tier">
-      <h2>
+    <div className="calendar-tier calendar-tier-current">
+      <h3>
         {title}
         {plan && (
           <span className="tier-kw">
@@ -143,8 +135,8 @@ function PlanWeekTier({ title, plan, phase }: { title: string; plan: WeeklyPlan 
             · KW {isoWeekNumber(plan.week_id)} ({formatShortDate(plan.week_start)}–{formatShortDate(plan.week_end)})
           </span>
         )}
-        {phase && <span className="tier-phase"> · {phase}</span>}
-      </h2>
+        {plan?.training_phase && <span className="tier-phase"> · {plan.training_phase}</span>}
+      </h3>
       {plan ? (
         <>
           {plan.week_rationale_text && <p className="week-rationale">{plan.week_rationale_text}</p>}
@@ -161,46 +153,57 @@ function PlanWeekTier({ title, plan, phase }: { title: string; plan: WeeklyPlan 
   );
 }
 
-// Nächste Woche + Übernächste Woche: gleiche Regeln (nur eine kurze Tages-Andeutung je Sportart-
-// Emoji, keine Workout-Details, kein Gemini-Call, siehe get_week_outlook()) - einziger Unterschied
-// ist Titel/Opacity-Stufe (tierVariant).
-function WeekOutlookTier({
+// Reduzierte Tages-Karte für Nächste/Übernächste Woche: Icon + kurzes Stichwort + gerundete Dauer,
+// keine Zone/exakte Distanz/Begründungstext, keine Action-Buttons (die gibt es nur in der
+// fixierten Woche). Kern-Einheiten (is_key_session) werden komplett in Akzentfarbe dargestellt,
+// statt der gedämpften Sekundärfarbe - so bleiben sie auch in der reduzierten Ansicht erkennbar.
+function CompactPlanDay({ day }: { day: WeeklyPlanDay }) {
+  return (
+    <div className={`compact-plan-day${day.is_key_session ? " key-session" : ""}`}>
+      <div className="compact-plan-day-weekday">
+        {WEEKDAY_LABELS[day.weekday]} <span className="compact-plan-day-date">{formatShortDate(day.date)}</span>
+      </div>
+      <div className="compact-plan-day-icon">
+        <Icon name={planDayIconName(day)} />
+      </div>
+      <div className="compact-plan-day-session">{shortSessionLabel(day)}</div>
+      {day.target_duration_minutes != null && (
+        <div className="compact-plan-day-duration">{roundedDurationLabel(day.target_duration_minutes)}</div>
+      )}
+    </div>
+  );
+}
+
+// Nächste Woche + Übernächste Woche: dieselbe Datengrundlage wie "Diese Woche" (echter,
+// Gemini-generierter weekly_plan - siehe get_weekly_plan-Endpoint), aber reduziert dargestellt
+// (CompactPlanDay statt PlanDay) - spürbar weniger Detailtiefe, aber genug für die grobe
+// Zeitplanung pro Tag. Einziger Unterschied zwischen den beiden: Titel/Opacity-Stufe (tierVariant).
+function CompactWeekTier({
   title,
-  outlook,
-  phase,
+  plan,
   tierVariant,
 }: {
   title: string;
-  outlook: WeekOutlook | null;
-  phase: string | null;
+  plan: WeeklyPlan | null;
   tierVariant: "week2" | "week3";
 }) {
   return (
-    <div className={`card calendar-tier calendar-tier-outlook calendar-tier-${tierVariant}`}>
+    <div className={`calendar-tier calendar-tier-compact calendar-tier-${tierVariant}`}>
       <h3>
         {title}
-        {outlook && (
+        {plan && (
           <span className="tier-kw">
             {" "}
-            · KW {isoWeekNumber(outlook.week_id)} ({formatShortDate(outlook.week_start)}–{formatShortDate(outlook.week_end)})
+            · KW {isoWeekNumber(plan.week_id)} ({formatShortDate(plan.week_start)}–{formatShortDate(plan.week_end)})
           </span>
         )}
-        {phase && <span className="tier-phase"> · {phase}</span>}
+        {plan?.training_phase && <span className="tier-phase"> · {plan.training_phase}</span>}
       </h3>
-      {outlook ? (
-        <div className="outlook-row">
-          {outlook.days.map((day) => {
-            const detail = outlookDetail(day);
-            return (
-              <div key={day.date} className="outlook-day-chip">
-                <div className="outlook-day-weekday">
-                  {WEEKDAY_LABELS[day.weekday]} <span className="outlook-day-date">{formatShortDate(day.date)}</span>
-                </div>
-                <div className="outlook-day-icon">{outlookIcon(day)}</div>
-                {detail && <div className="outlook-day-hint">{detail}</div>}
-              </div>
-            );
-          })}
+      {plan ? (
+        <div className="compact-plan-days-row">
+          {plan.days.map((day) => (
+            <CompactPlanDay key={day.date} day={day} />
+          ))}
         </div>
       ) : (
         <p>Lade…</p>
@@ -211,12 +214,12 @@ function WeekOutlookTier({
 
 // Ab Woche 4: eine Zeile/Balken pro Woche bis zum nächsten Rennen (siehe weekly_planner.py::
 // get_far_weeks_outlook). Rendert nichts, falls kein Rennen mehr ansteht - "wenn kein Wettkampf
-// mehr ansteht, dann ist nach Woche 3 Schluss".
+// mehr ansteht, dann ist nach Übernächste Woche Schluss".
 function FarWeeksBars({ weeks }: { weeks: FarWeekBar[] | null }) {
   if (!weeks || weeks.length === 0) return null;
 
   return (
-    <div className="card calendar-tier calendar-tier-far">
+    <div className="calendar-tier calendar-tier-far">
       {weeks.map((week) => (
         <div key={week.week_id} className={`far-week-bar${week.race_title ? " far-week-bar-race" : ""}`}>
           <span className="far-week-bar-kw">KW {week.iso_week}</span>
@@ -225,7 +228,7 @@ function FarWeeksBars({ weeks }: { weeks: FarWeekBar[] | null }) {
           </span>
           {week.race_title ? (
             <span className="far-week-bar-race-label">
-              🏁 {week.race_title} ({formatShortDate(week.race_date ?? week.week_end)})
+              <Icon name="flag" /> {week.race_title} ({formatShortDate(week.race_date ?? week.week_end)})
             </span>
           ) : (
             <span className="far-week-bar-phase">{week.training_phase ?? "–"}</span>
@@ -238,9 +241,8 @@ function FarWeeksBars({ weeks }: { weeks: FarWeekBar[] | null }) {
 
 function WeeklyCalendarWidget() {
   const [thisWeek, setThisWeek] = useState<WeeklyPlan | null>(null);
-  const [nextWeekOutlook, setNextWeekOutlook] = useState<WeekOutlook | null>(null);
-  const [weekAfterNextOutlook, setWeekAfterNextOutlook] = useState<WeekOutlook | null>(null);
-  const [outlook, setOutlook] = useState<TrainingOutlook | null>(null);
+  const [nextWeek, setNextWeek] = useState<WeeklyPlan | null>(null);
+  const [weekAfterNext, setWeekAfterNext] = useState<WeeklyPlan | null>(null);
   const [farWeeks, setFarWeeks] = useState<FarWeekBar[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -248,33 +250,29 @@ function WeeklyCalendarWidget() {
     fetchWeeklyPlan(todayIso())
       .then(setThisWeek)
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
-    // Nächste + übernächste Woche folgen jetzt denselben Regeln (kurze Andeutung, kein Gemini-
-    // Call) - der konkrete Gemini-Plan für nächste Woche wird trotzdem weiterhin vom Sonntags-
-    // Trigger in auto_sync.py vorbereitet, nur nicht mehr hier angezeigt, sondern erst, wenn diese
-    // Woche zu "Diese Woche" wird.
-    fetchWeekOutlook(nextMondayIso())
-      .then(setNextWeekOutlook)
+    // Nächste + übernächste Woche nutzen dieselbe echte weekly_plan-Datengrundlage wie "Diese
+    // Woche" (der Sonntags-Trigger in auto_sync.py hat sie i.d.R. schon vorbereitet, sonst lazy
+    // generiert wie bei "Diese Woche") - nur die Darstellung ist reduziert (CompactWeekTier).
+    fetchWeeklyPlan(nextMondayIso())
+      .then(setNextWeek)
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
-    fetchWeekOutlook(weekAfterNextMondayIso())
-      .then(setWeekAfterNextOutlook)
+    fetchWeeklyPlan(weekAfterNextMondayIso())
+      .then(setWeekAfterNext)
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
-    fetchTrainingOutlook()
-      .then(setOutlook)
-      .catch(() => setOutlook(null));
     fetchFarWeeksOutlook(todayIso())
       .then((res) => setFarWeeks(res.weeks))
       .catch(() => setFarWeeks([]));
   }, []);
 
-  const phase = outlook?.training_phase ?? null;
-
   return (
-    <div className="weekly-calendar-widget">
+    <div>
       {error && <p className="error-banner">Fehler: {error}</p>}
-      <PlanWeekTier title="Diese Woche" plan={thisWeek} phase={phase} />
-      <WeekOutlookTier title="Nächste Woche" outlook={nextWeekOutlook} phase={phase} tierVariant="week2" />
-      <WeekOutlookTier title="Übernächste Woche" outlook={weekAfterNextOutlook} phase={phase} tierVariant="week3" />
-      <FarWeeksBars weeks={farWeeks} />
+      <div className="card weekly-calendar-widget">
+        <PlanWeekTier title="Diese Woche" plan={thisWeek} />
+        <CompactWeekTier title="Nächste Woche" plan={nextWeek} tierVariant="week2" />
+        <CompactWeekTier title="Übernächste Woche" plan={weekAfterNext} tierVariant="week3" />
+        <FarWeeksBars weeks={farWeeks} />
+      </div>
     </div>
   );
 }

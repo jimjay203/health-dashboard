@@ -35,6 +35,47 @@ def _safe_call(client, label, func):
         return None
 
 
+def _primary_device_entry(data_by_device_id):
+    """latestTrainingStatusData ist ein Dict keyed by deviceId (String) - bei mehreren
+    Geräten/Quellen das als primaryTrainingDevice=True markierte nehmen, sonst das erste.
+    None, falls data_by_device_id leer/None ist."""
+    if not data_by_device_id:
+        return None
+    for entry in data_by_device_id.values():
+        if entry.get("primaryTrainingDevice"):
+            return entry
+    return next(iter(data_by_device_id.values()))
+
+
+def _parse_load_focus_pct(load_balance):
+    """Anaerob/Hoch-Aerob/Niedrig-Aerob-Verteilung aus metricsTrainingLoadBalanceDTOMap - Ground-
+    Truth-Fund: für dieses Konto bisher in JEDEM synchronisierten Tag null (Garmin liefert diese
+    Aufschlüsselung offenbar nicht für jedes Gerät/jeden Kontostand). Feldnamen hier daher NICHT an
+    echten befüllten Daten verifizierbar (best effort anhand dokumentierter Garmin-Connect-Felder) -
+    gibt (None, None, None) zurück, falls die Map fehlt/leer ist oder die erwarteten Felder nicht
+    vorhanden sind, statt etwas zu erfinden. Bei Bedarf anhand echter befüllter Daten nachschärfen,
+    sobald Garmin sie für dieses Konto einmal liefert."""
+    dto_map = (load_balance or {}).get("metricsTrainingLoadBalanceDTOMap")
+    if not dto_map:
+        return None, None, None
+    entry = _primary_device_entry(dto_map)
+    if not entry:
+        return None, None, None
+    anaerobic = entry.get("monthlyLoadAnaerobic")
+    high_aerobic = entry.get("monthlyLoadAerobicHigh")
+    low_aerobic = entry.get("monthlyLoadAerobicLow")
+    if anaerobic is None or high_aerobic is None or low_aerobic is None:
+        return None, None, None
+    total = anaerobic + high_aerobic + low_aerobic
+    if not total:
+        return None, None, None
+    return (
+        round(anaerobic / total * 100, 1),
+        round(high_aerobic / total * 100, 1),
+        round(low_aerobic / total * 100, 1),
+    )
+
+
 def fetch_and_store_garmin_data(target_date=None, client=None):
     """Holt die Kern-Metriken sowie alle erweiterten Metrik-Gruppen für ein Datum und
     speichert sie in SQLite. Erlaubt die Übergabe eines bestehenden Client-Objekts für Re-Use.
@@ -99,9 +140,22 @@ def fetch_and_store_garmin_data(target_date=None, client=None):
             "sleep_need_seconds": sleep_need_minutes * 60 if sleep_need_minutes is not None else None,
         })
 
+    # hrvSummary enthält neben dem reinen Zahlenwert auch Garmins eigene Status-Einordnung
+    # ("BALANCED"/"UNBALANCED"/"LOW"/"NONE" bei Onboarding) + eine Baseline-Range - bisher nur
+    # ungenutzt im raw_json-Blob (siehe "Leistung"-Seite/performance.py).
     avg_hrv = None
+    hrv_status = None
+    hrv_last_night_avg = None
+    hrv_baseline_balanced_low = None
+    hrv_baseline_balanced_upper = None
     if hrv_data and "hrvSummary" in hrv_data:
-        avg_hrv = hrv_data["hrvSummary"].get("weeklyAvg") or hrv_data["hrvSummary"].get("lastNightAvg")
+        hrv_summary = hrv_data["hrvSummary"] or {}
+        avg_hrv = hrv_summary.get("weeklyAvg") or hrv_summary.get("lastNightAvg")
+        hrv_status = hrv_summary.get("status")
+        hrv_last_night_avg = hrv_summary.get("lastNightAvg")
+        baseline = hrv_summary.get("baseline") or {}
+        hrv_baseline_balanced_low = baseline.get("balancedLow")
+        hrv_baseline_balanced_upper = baseline.get("balancedUpper")
 
     db_payload = {
         "date": target_date,
@@ -113,6 +167,10 @@ def fetch_and_store_garmin_data(target_date=None, client=None):
         "body_battery_min": stats.get("bodyBatteryDrainedValue"),
         "stress_avg": stress_avg,
         "steps": steps,
+        "hrv_status": hrv_status,
+        "hrv_last_night_avg": hrv_last_night_avg,
+        "hrv_baseline_balanced_low": hrv_baseline_balanced_low,
+        "hrv_baseline_balanced_upper": hrv_baseline_balanced_upper,
         "raw_json": json.dumps({"stats": stats, "sleep": sleep_data, "hrv": hrv_data})
     }
     save_garmin_data(db_payload)
@@ -252,14 +310,36 @@ def _fetch_advanced_health(client, target_date):
         vo2max_data = training_status.get("mostRecentVO2Max") or {}
         vo2max_generic = vo2max_data.get("generic") or {}
         vo2max_cycling = vo2max_data.get("cycling") or {}
+
+        load_balance = training_status.get("mostRecentTrainingLoadBalance")
+        training_status_entry = training_status.get("mostRecentTrainingStatus")
+        device_entry = _primary_device_entry(
+            (training_status_entry or {}).get("latestTrainingStatusData")
+        )
+        acute_load_dto = (device_entry or {}).get("acuteTrainingLoadDTO") or {}
+        load_focus = _parse_load_focus_pct(load_balance)
+
         upsert_daily_metric("garmin_training_status", {
             "date": target_date,
             "most_recent_vo2max": vo2max_generic.get("vo2MaxPreciseValue") or vo2max_generic.get("vo2MaxValue"),
             "most_recent_vo2max_cycling": vo2max_cycling.get("vo2MaxPreciseValue") or vo2max_cycling.get("vo2MaxValue"),
-            "training_load_balance": json.dumps(training_status.get("mostRecentTrainingLoadBalance"))
-                if training_status.get("mostRecentTrainingLoadBalance") else None,
-            "training_status": json.dumps(training_status.get("mostRecentTrainingStatus"))
-                if training_status.get("mostRecentTrainingStatus") else None,
+            "training_load_balance": json.dumps(load_balance) if load_balance else None,
+            "training_status": json.dumps(training_status_entry) if training_status_entry else None,
+            # Trainingszustand als Klartext-Label + akute Belastung/Optimalbereich/ACWR-Status -
+            # aus demselben, bereits abgerufenen Response geparst (kein zusätzlicher API-Call).
+            # Für dieses Konto bisher durchgängig "NO_STATUS_1" beobachtet (Gerät liefert noch
+            # keinen echten Trainingszustand) - das ist ein Garmin-seitiger Datenstand, kein Bug.
+            "training_status_label": device_entry.get("trainingStatusFeedbackPhrase") if device_entry else None,
+            "training_status_code": device_entry.get("trainingStatus") if device_entry else None,
+            "acute_training_load": acute_load_dto.get("dailyTrainingLoadAcute"),
+            "chronic_training_load": acute_load_dto.get("dailyTrainingLoadChronic"),
+            "chronic_load_min": acute_load_dto.get("minTrainingLoadChronic"),
+            "chronic_load_max": acute_load_dto.get("maxTrainingLoadChronic"),
+            "acwr_status": acute_load_dto.get("acwrStatus"),
+            "acwr_ratio": acute_load_dto.get("dailyAcuteChronicWorkloadRatio"),
+            "load_focus_anaerobic_pct": load_focus[0],
+            "load_focus_high_aerobic_pct": load_focus[1],
+            "load_focus_low_aerobic_pct": load_focus[2],
             "raw_json": json.dumps(training_status),
         })
 

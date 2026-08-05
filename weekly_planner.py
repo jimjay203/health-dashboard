@@ -17,14 +17,13 @@ sollte die kommende Woche haben" dem Gemini-Kontext (Renn-Countdown + CTL/ATL/TS
 wird keine nicht-reale "Phase der kommenden Woche" selbst berechnet.
 """
 import json
-from collections import Counter
 from datetime import date, datetime, timedelta
 
 from google.genai import types
 from db import get_connection, upsert_daily_metric
 from gemini_client import MODEL_NAME, get_client
 from context_blocks import insight_memory_block, strip_markdown_fences
-from weekly_summary import TAPER_DAYS_THRESHOLD, PEAK_DAYS_THRESHOLD
+from weekly_summary import TAPER_DAYS_THRESHOLD, PEAK_DAYS_THRESHOLD, _days_until_next_race
 from workout_builder import build_interval_running_workout, build_steady_running_workout
 
 WEEKDAY_NAMES = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
@@ -50,30 +49,69 @@ RESPONSE_SCHEMA = {
                     "target_zone": {"type": "STRING"},
                     "target_duration_minutes": {"type": "NUMBER"},
                     "target_distance_m": {"type": "NUMBER"},
+                    "is_key_session": {"type": "BOOLEAN"},
                 },
-                "required": ["date", "sport_type", "session_type"],
+                "required": ["date", "sport_type", "session_type", "is_key_session"],
             },
         },
     },
     "required": ["week_rationale", "days"],
 }
 
+# Phasen-spezifische Direktive für den Prompt (Teil 1 des Nachbesserungs-Auftrags) - vorher bekam
+# das Modell die Phase gar nicht explizit mitgeteilt (nur implizit über den Renn-Countdown
+# erschließbar), wodurch aufeinanderfolgende Wochen mit unterschiedlicher Phase inhaltlich fast
+# identische Vorschläge bekamen (z.B. wortgleicher Long Run in einer Build- und einer
+# Peak-Woche). Bewusst konkret formuliert (was genau soll sich ändern), nicht nur als Label.
+PHASE_GUIDANCE = {
+    "Taper": "Umfang gegenüber der Vorwoche deutlich reduzieren (Erholung vor dem Rennen), "
+             "Intensität kurz und knackig halten, keinen neuen Umfang mehr aufbauen.",
+    "Peak": "Umfang bleibt etwa stabil, aber baue renn-spezifische Tempoabschnitte/Race-Pace-"
+            "Passagen ein (z.B. Teile des langen Laufs im Zielrennen-Tempo statt komplett in "
+            "Zone 2) - Qualität vor zusätzlicher Quantität.",
+    "Build": "Umfang gegenüber der Vorwoche gezielt steigern, vor allem den langen Lauf am "
+             "Wochenende spürbar verlängern (nutze longest_session_km aus 'LETZTE ABGESCHLOSSENE "
+             "WOCHE' als Ausgangswert, nicht nur symbolisch um 1-2 Minuten erhöhen).",
+    "Base": "Aerobe Basis aufbauen - durchgehend Zone 1-2, keine Tempoabschnitte, Umfang moderat "
+            "und nachhaltig.",
+}
+
 SYSTEM_PROMPT = """
 Du bist ein Trainings-Coach-Assistent für einen Marathon-/Triathlon-Athleten. Du planst die
-KOMMENDE Trainingswoche (Montag bis Sonntag) basierend auf der zuletzt abgeschlossenen Woche,
-dem CTL/ATL/TSB-Trend, einem Übertrainings-Signal, festen Vereinsterminen, dem
-Erkenntnis-Gedächtnis, einem Compliance-Vergleich zur Vorwoche (falls vorhanden) und dem
-nächsten Rennen.
+KOMMENDE Trainingswoche (Montag bis Sonntag) basierend auf der Trainingsphase dieser Woche, der
+zuletzt abgeschlossenen Woche, dem CTL/ATL/TSB-Trend, einem Übertrainings-Signal, festen
+Vereinsterminen, dem Erkenntnis-Gedächtnis, einem Compliance-Vergleich zur Vorwoche (falls
+vorhanden) und dem nächsten Rennen.
+
+Die Trainingsphase dieser Woche (siehe "TRAININGSPHASE DIESER WOCHE") ist der wichtigste Hebel für
+die Wochengestaltung - setze die dort genannte Anweisung aktiv um, nicht nur als Info-Label. Zwei
+aufeinanderfolgende Wochen mit unterschiedlicher Phase sollen sich in Umfang und/oder Intensität
+der Kerneinheiten (v.a. dem langen Lauf) klar erkennbar unterscheiden - keine wortgleichen oder
+nahezu identischen Vorschläge zwischen unterschiedlichen Phasen.
 
 Für JEDEN der 7 Tage gibst du einen Vorschlag ab - auch für Tage mit festem Vereinstermin (siehe
 "FESTE VEREINSTERMINE KOMMENDE WOCHE"). An Vereinstermin-Tagen sind Sportart und die Tatsache,
 dass eine Einheit stattfindet, bereits fix - trotzdem bestimmst du Session-Typ/Fokus innerhalb
 dieses Rahmens selbst, passend zu dem, was an diesem Slot realistisch möglich ist (die
 Zusatzinfo hinter jedem Termin, falls vorhanden, beschreibt das - z.B. "Bahntraining: meist
-Intervalle, 400-1000m Wiederholungen") UND zum aktuellen Kontext (z.B. in einer Taper-Woche
+Intervalle, 400-1000m Wiederholungen") UND zur aktuellen Trainingsphase (z.B. in einer Taper-Woche
 trotz Bahntraining nur eine kurze, lockere Aktivierungseinheit vorschlagen). An freien Tagen
 bestimmst du Sportart, Session-Typ, Zielzone und Dauer/Distanz komplett selbst - auch Ruhetage
 sind ein gültiger Vorschlag (sport_type dann leer lassen, session_type z.B. "Ruhetag").
+
+Für jeden Tag mit einer Einheit (nicht für Ruhetage) schätzt du zusätzlich is_key_session ein:
+true, wenn diese Einheit für das Wochenziel schwer verschiebbar/ausfallbar ist, ohne die Woche
+spürbar zu schwächen; false, wenn sie flexibel ist. Kriterien (bewusst phasenabhängig, nicht hart
+an Sportart/Session-Typ festgemacht):
+- In Build-/Peak-Wochen ist der lange Lauf bzw. die renn-spezifische Qualitätseinheit meist Kern
+  (true).
+- In Base-Wochen oder weit vor dem Rennen ist derselbe Einheitstyp oft flexibler (false).
+- Regenerations-/Technik-/lockere Einheiten sind in aller Regel flexibel (false), unabhängig von
+  der Phase.
+- Auch ein fester Vereinstermin kann Kern sein, wenn die aktuelle Phase genau darauf aufbaut (z.B.
+  Bahntraining in einer Intervall-fokussierten Peak-Phase) - schätze das jeweils neu ein, verlasse
+  dich nicht automatisch auf "Vereinstermin = Kern" oder "Vereinstermin = flexibel".
+Für Ruhetage setze is_key_session auf false.
 
 Falls die Eingabedaten lückenhaft sind (z.B. keine CTL/ATL/TSB-Werte oder keine
 zuletzt-abgeschlossene Woche), fixiere trotzdem einen vollständigen Plan, aber benenne die Lücken
@@ -99,7 +137,8 @@ Gib AUSSCHLIESSLICH valides JSON zurück im Format:
  "days": [{"date": "YYYY-MM-DD", "sport_type": "<Sportart, leer für Ruhetag>",
            "session_type": "<z.B. Intervalltraining, lockerer Dauerlauf, Ruhetag>",
            "target_zone": "<z.B. 2, optional>", "target_duration_minutes": <Zahl, optional>,
-           "target_distance_m": <Zahl, optional>}, ... genau 7 Einträge, Montag bis Sonntag]}
+           "target_distance_m": <Zahl, optional>, "is_key_session": <true/false>},
+          ... genau 7 Einträge, Montag bis Sonntag]}
 """
 
 
@@ -232,6 +271,24 @@ def _race_countdown_block(cursor, week_start):
     return f"Nächstes Rennen: {row['title']} am {row['event_date']} (in {days_until} Tagen{distance})"
 
 
+def _week_phase(cursor, week_start):
+    """Kernlogik von get_week_phase() (siehe dortiger Docstring) - nimmt einen bereits offenen
+    cursor entgegen, damit _gather_weekly_context() sie ohne zusätzliche DB-Verbindung
+    wiederverwenden kann (get_week_phase() bleibt der eigenständige Wrapper für externe Aufrufer
+    wie backend/routers/weekly_plan.py)."""
+    days_until_race = _days_until_next_race(cursor, week_start.isoformat())
+    if days_until_race is not None and days_until_race <= TAPER_DAYS_THRESHOLD:
+        return "Taper"
+    if days_until_race is not None and days_until_race <= PEAK_DAYS_THRESHOLD:
+        return "Peak"
+    return "Build"
+
+
+def _training_phase_block(cursor, week_start):
+    phase = _week_phase(cursor, week_start)
+    return f"Phase: {phase}. {PHASE_GUIDANCE[phase]}"
+
+
 def _compliance_block(cursor, prev_week_id, prev_week_start, prev_week_end):
     """None, falls für die Vorwoche noch kein weekly_plan existiert (z.B. allererster Lauf) -
     Aufrufer lässt den ganzen Abschnitt dann aus, statt mit Nullen aufzufüllen."""
@@ -278,7 +335,9 @@ def _gather_weekly_context(cursor, week_id, week_start, days, club_slots_by_day,
     prev_week_end = (week_start - timedelta(days=1)).isoformat()
 
     parts = [
-        "=== LETZTE ABGESCHLOSSENE WOCHE ===",
+        "=== TRAININGSPHASE DIESER WOCHE ===",
+        _training_phase_block(cursor, week_start),
+        "\n=== LETZTE ABGESCHLOSSENE WOCHE ===",
         _recent_weekly_summary_block(cursor, week_id),
         "\n=== CTL/ATL/TSB-TREND (14 TAGE) ===",
         _ctl_atl_tsb_trend_block(cursor, week_start),
@@ -422,6 +481,7 @@ def generate_weekly_plan(reference_date):
                 "target_zone": None,
                 "target_duration_minutes": None,
                 "target_distance_m": None,
+                "is_key_session": None,
                 "is_club_slot": 0,
                 "source": "race",
                 "week_rationale_text": week_rationale,
@@ -438,6 +498,7 @@ def generate_weekly_plan(reference_date):
                 "target_zone": entry.get("target_zone"),
                 "target_duration_minutes": entry.get("target_duration_minutes"),
                 "target_distance_m": entry.get("target_distance_m"),
+                "is_key_session": int(bool(entry.get("is_key_session"))),
                 "is_club_slot": int(club_row is not None),
                 "source": "club" if club_row is not None else "generated",
                 "week_rationale_text": week_rationale,
@@ -467,68 +528,6 @@ def get_week_plan(reference_date):
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
-
-
-def _typical_weekday_pattern(cursor, weekday, sample_weeks=8):
-    """Häufigstes sport_type/session_type-Muster für einen Wochentag aus der eigenen
-    weekly_plan-Historie - KEIN Gemini-Call. Für einen so weit entfernten, unsicheren Horizont
-    (Woche 3) reicht eine aus dem eigenen bisherigen Muster abgeleitete Andeutung, kein neuer
-    LLM-Aufruf nötig (und ehrlicher als eine frisch spekulierende Modell-Antwort)."""
-    rows = cursor.execute(
-        "SELECT sport_type, session_type FROM weekly_plan WHERE weekday = ? AND sport_type IS NOT NULL "
-        "AND source != 'race' ORDER BY date DESC LIMIT ?",
-        (weekday, sample_weeks)
-    ).fetchall()
-    if not rows:
-        return None, None
-    most_common_sport = Counter(r["sport_type"] for r in rows).most_common(1)[0][0]
-    matching_sessions = [r["session_type"] for r in rows if r["sport_type"] == most_common_sport and r["session_type"]]
-    session_hint = Counter(matching_sessions).most_common(1)[0][0] if matching_sessions else None
-    return most_common_sport, session_hint
-
-
-def get_week_outlook(reference_date):
-    """Grobe Tages-Andeutungen für eine weiter entfernte Woche (Woche 3 im Kalender-Widget) -
-    KEINE Workout-Details, nur ein kurzer Hinweis pro Tag ("Mittwoch: vermutlich Intervalle"),
-    kein Gemini-Call. Club-Slot-/Wettkampf-Tage nutzen die feste Information (Slot-Sportart +
-    kurzer typical_character-Auszug bzw. Renn-Titel); freie Tage nutzen das häufigste eigene
-    Muster dieses Wochentags aus der weekly_plan-Historie (siehe _typical_weekday_pattern)."""
-    _, week_start, days = _week_bounds(reference_date)
-    conn = get_connection()
-    cursor = conn.cursor()
-    club_slots_by_day = _club_slots_for_days(cursor, days)
-    race_days = _race_days_for(cursor, days)
-
-    outlook = []
-    for day in days:
-        day_str = day.isoformat()
-        race_title = race_days.get(day_str)
-        club_row = club_slots_by_day.get(day_str)
-
-        if race_title:
-            outlook.append({
-                "date": day_str, "weekday": day.weekday(),
-                "sport_type": None, "hint": f"Wettkampf: {race_title}",
-            })
-            continue
-
-        if club_row:
-            hint = club_row["sport_type"]
-            if club_row["typical_character"]:
-                teaser = club_row["typical_character"].split(":")[0].split(",")[0]
-                hint = f"{club_row['sport_type']} ({teaser})"
-            outlook.append({
-                "date": day_str, "weekday": day.weekday(),
-                "sport_type": club_row["sport_type"], "hint": hint,
-            })
-            continue
-
-        sport_type, session_hint = _typical_weekday_pattern(cursor, day.weekday())
-        hint = (f"{sport_type} ({session_hint})" if session_hint else sport_type) if sport_type else None
-        outlook.append({"date": day_str, "weekday": day.weekday(), "sport_type": sport_type, "hint": hint})
-
-    conn.close()
-    return outlook
 
 
 def get_far_weeks_outlook(reference_date):
@@ -587,3 +586,31 @@ def get_far_weeks_outlook(reference_date):
         cursor_week_start += timedelta(weeks=1)
 
     return weeks
+
+
+def get_week_phase(reference_date):
+    """Ehrlich berechnete Trainingsphase für eine beliebige Woche (auch zukünftig), anhand des
+    EIGENEN Wochenstarts dieser Woche als Referenzdatum für die "nächstes Rennen ab hier"-Suche -
+    exakt dieselbe Logik wie weekly_summary.py::_training_phase/_days_until_next_race, nur
+    prospektiv für eine beliebige Woche aufgerufen statt nur rückwirkend für die zuletzt
+    abgeschlossene.
+
+    Bugfix-Hintergrund: "Nächste Woche"/"Übernächste Woche" im Kalender-Widget zeigten vorher
+    fälschlich dieselbe Phase wie "Diese Woche" (wiederverwendeter Wert aus GET
+    /api/training-outlook, das nur die zuletzt abgeschlossene weekly_summary-Zeile liefert) - eine
+    Woche NACH einem nahen Rennen erbte so dessen (kurzen) Countdown, statt den Countdown zum
+    nächsten Rennen AB IHREM EIGENEN Wochenstart zu bekommen.
+
+    Taper/Peak sind reine Datums-Schwellenwerte und daher sicher projizierbar (siehe
+    get_far_weeks_outlook-Docstring). Jenseits beider Schwellen gibt es kein echtes
+    Trainingsvolumen einer noch nicht stattgefundenen Woche zum Vergleichen (siehe
+    weekly_summary.py::_training_phase) - hier wird deshalb standardmäßig "Build" angenommen: eine
+    Woche, die weder kurz vor noch kurz nach einem Rennen liegt, ist in aller Regel eine
+    Aufbauwoche (anders als get_far_weeks_outlook() oben, das für diesen Fall bewusst None zeigt -
+    dort geht es um einen viel weiter entfernten, unsichereren Horizont ab Woche 4)."""
+    _, week_start, _ = _week_bounds(reference_date)
+    conn = get_connection()
+    cursor = conn.cursor()
+    phase = _week_phase(cursor, week_start)
+    conn.close()
+    return phase

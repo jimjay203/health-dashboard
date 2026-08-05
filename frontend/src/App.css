@@ -17,6 +17,15 @@
   top: 0;
   height: 100svh;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  transition: flex-basis 0.15s ease;
+}
+
+/* Eingeklappt: nur Icons bleiben sichtbar (siehe sidebarCollapsed.ts, localStorage-persistiert). */
+.sidebar.collapsed {
+  flex-basis: 72px;
+  padding: 24px 12px;
 }
 
 .sidebar-brand {
@@ -27,10 +36,15 @@
   margin-bottom: 28px;
 }
 
+.sidebar.collapsed .sidebar-brand {
+  padding: 0;
+  justify-content: center;
+}
+
 .sidebar-brand-mark {
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--accent);
   color: #04140c;
   font-weight: 700;
@@ -43,13 +57,14 @@
 .sidebar-brand-name {
   font-weight: 600;
   color: var(--text-h);
-  font-size: 15px;
+  font-size: var(--text-base);
 }
 
 .sidebar-nav {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  flex: 1;
 }
 
 .sidebar-nav-item {
@@ -57,14 +72,19 @@
   align-items: center;
   gap: 10px;
   font: inherit;
-  font-size: 15px;
+  font-size: var(--text-base);
   text-align: left;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: none;
   background: transparent;
   color: var(--text);
   cursor: pointer;
+}
+
+.sidebar.collapsed .sidebar-nav-item {
+  justify-content: center;
+  padding: 10px;
 }
 
 .sidebar-nav-item:hover {
@@ -78,7 +98,27 @@
 }
 
 .sidebar-nav-icon {
-  font-size: 16px;
+  font-size: var(--text-md);
+  display: flex;
+}
+
+.sidebar-collapse-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-md);
+  padding: 8px;
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.sidebar-collapse-toggle:hover {
+  background: var(--surface-2);
 }
 
 .main-content {
@@ -104,20 +144,18 @@
 }
 
 .top-bar-clock {
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--text);
   margin-bottom: 6px;
 }
 
 .top-bar-title {
-  font-size: 28px;
-  letter-spacing: normal;
   margin: 0 0 4px;
 }
 
 .top-bar-subtitle {
   color: var(--text);
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 
 .top-bar-right {
@@ -127,9 +165,9 @@
 }
 
 .sync-badge {
-  font-size: 12px;
+  font-size: var(--text-xs);
   padding: 6px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--border);
   white-space: nowrap;
 }
@@ -163,19 +201,20 @@
 .theme-toggle {
   display: flex;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 3px;
   gap: 2px;
 }
 
 .theme-toggle button {
-  font-size: 14px;
+  font-size: var(--text-md);
   line-height: 1;
   padding: 6px 9px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: none;
   background: transparent;
   cursor: pointer;
+  display: flex;
 }
 
 .theme-toggle button.active {
@@ -186,7 +225,7 @@
 
 .card {
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   background: var(--surface);
   padding: 20px;
   box-sizing: border-box;
@@ -205,13 +244,6 @@
   gap: 20px;
 }
 
-.day-score-card {
-  display: flex;
-  gap: 28px;
-  align-items: flex-start;
-  flex-wrap: wrap;
-}
-
 .readiness-dial {
   display: flex;
   flex-direction: column;
@@ -220,23 +252,43 @@
   flex: 0 0 auto;
 }
 
-.readiness-dial-score {
-  font-size: 30px;
-  font-weight: 700;
-  fill: var(--text-h);
+/* Chart.js-Doughnut-Gauge: Ring per Canvas, Mittentext als HTML-Overlay obendrauf statt Canvas-Text
+   (folgt damit normalen CSS-Text-Tokens statt Canvas-fillStyle). */
+
+.readiness-gauge-canvas {
+  position: relative;
+  width: 140px;
+  height: 140px;
 }
 
-.readiness-dial-caption {
-  font-size: 10px;
-  fill: var(--text);
+.readiness-gauge-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.readiness-gauge-score {
+  font-size: var(--text-display);
+  font-weight: 700;
+  color: var(--text-h);
+  line-height: 1.2;
+}
+
+.readiness-gauge-caption {
+  font-size: var(--text-2xs);
+  color: var(--text);
   letter-spacing: 0.08em;
 }
 
 .day-score-pill {
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 600;
   padding: 4px 12px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid;
   background: transparent;
 }
@@ -246,7 +298,7 @@
 }
 
 .recommendation-label {
-  font-size: 11px;
+  font-size: var(--text-2xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text);
@@ -254,8 +306,9 @@
 }
 
 .recommendation-text {
-  font-size: 18px;
+  font-size: var(--text-headline);
   font-weight: 600;
+  line-height: 1.45;
   color: var(--text-h);
   margin-bottom: 12px;
 }
@@ -265,10 +318,16 @@
   padding-left: 20px;
   text-align: left;
   color: var(--text);
+  font-size: var(--text-md);
+  line-height: 1.6;
 }
 
 .reasoning-bullets li {
-  margin-bottom: 6px;
+  margin-bottom: 10px;
+}
+
+.reasoning-bullets li:last-child {
+  margin-bottom: 0;
 }
 
 .override-buttons {
@@ -279,7 +338,7 @@
 .override-buttons button {
   font: inherit;
   padding: 8px 14px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--surface-2);
   color: var(--text-h);
@@ -291,62 +350,39 @@
   cursor: default;
 }
 
-/* --- Metrik-Kacheln --- */
-
-.metric-tiles {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-}
-
-@media (max-width: 900px) {
-  .metric-tiles {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-.metric-tile {
-  text-align: left;
-}
-
-.metric-tile-label {
-  font-size: 13px;
-  color: var(--text);
-  margin-bottom: 4px;
-}
-
-.metric-tile-value {
-  font-size: 22px;
-  font-weight: 600;
-  color: var(--text-h);
-  margin-bottom: 8px;
-}
-
-.metric-tile-sparkline {
-  width: 100%;
-  height: 30px;
-}
-
 /* --- Rolling-Horizon-Kalender-Widget --- */
+/* Eine durchgehende Karte für alle vier Ebenen (statt vier einzelner Karten) - Ebenen sind
+   Abschnitte innerhalb derselben Fläche, per Trennlinie statt Abstand/eigenem Rahmen abgesetzt,
+   damit "diese Woche -> ... -> nächster Wettkampf" optisch als ein zusammenhängender Kalender statt
+   als lose Kartenreihe wirkt. "Diese Woche" bleibt auf der hellen Karten-Fläche (--surface) und
+   hebt sich dadurch von den nachfolgenden, gedämpften Ebenen ab (--bg + graue Tages-Chips), statt
+   nur über Opazität abgestuft zu sein. */
 
 .weekly-calendar-widget {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+  padding: 0;
+  overflow: hidden;
 }
 
-.calendar-tier h2,
+.calendar-tier {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.calendar-tier:last-child {
+  border-bottom: none;
+}
+
+.calendar-tier-current {
+  background: var(--surface);
+}
+
 .calendar-tier h3 {
   text-align: left;
   margin-bottom: 12px;
 }
 
-.calendar-tier h3 {
-  font-size: 16px;
-}
-
 .week-rationale {
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--text);
   margin-bottom: 16px;
 }
@@ -364,7 +400,7 @@
   min-width: 120px;
   text-align: center;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   padding: 10px 8px;
   background: var(--surface-2);
 }
@@ -375,24 +411,24 @@
 }
 
 .plan-day-weekday {
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text);
   margin-bottom: 4px;
 }
 
 .plan-day-icon {
-  font-size: 20px;
+  font-size: var(--text-lg);
 }
 
 .plan-day-session {
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 600;
   color: var(--text-h);
   margin-top: 4px;
 }
 
 .plan-day-detail {
-  font-size: 11px;
+  font-size: var(--text-2xs);
   color: var(--text);
   margin-top: 2px;
 }
@@ -407,9 +443,9 @@
 .plan-day-actions button,
 .plan-day-actions a {
   font: inherit;
-  font-size: 11px;
+  font-size: var(--text-2xs);
   padding: 4px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text-h);
@@ -418,19 +454,28 @@
 }
 
 .plan-day-uploaded {
-  font-size: 11px;
+  font-size: var(--text-2xs);
   color: var(--accent);
 }
 
 .plan-day-error {
-  font-size: 11px;
+  font-size: var(--text-2xs);
   color: #e5484d;
+  margin-top: 4px;
+}
+
+/* Kern-Einheit-Badge (Diese Woche) - dezent, gleicher Stil wie .plan-day-uploaded (kleines
+   Icon+Text statt einer eigenen Box). */
+
+.plan-day-key-badge {
+  font-size: var(--text-2xs);
+  color: var(--accent);
   margin-top: 4px;
 }
 
 .tier-phase,
 .tier-kw {
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 400;
   color: var(--text);
   text-transform: none;
@@ -438,19 +483,21 @@
 }
 
 .plan-day-date,
-.outlook-day-date {
+.compact-plan-day-date {
   opacity: 0.7;
 }
 
-/* Nächste Woche + Übernächste Woche (Andeutungs-Ebene, kein Gemini-Call, gleiche Regeln) -
-   bewusst kompakter als die "Diese Woche"-Karte: weniger Padding, kleinere Schrift, Sportart als
-   Emoji statt Wort. */
+/* Nächste Woche + Übernächste Woche - dieselbe echte weekly_plan-Datengrundlage wie "Diese
+   Woche", aber reduziert dargestellt: kein Begründungstext, gerundete statt exakter Dauer, keine
+   Zone/Distanz, keine Action-Buttons. Bewusst kompakter als die "Diese Woche"-Karte: weniger
+   Padding, kleinere Schrift, Sportart als Emoji statt Wort. */
 
-.calendar-tier-outlook {
-  padding: 14px 16px;
+.calendar-tier-compact {
+  padding: 12px 20px;
+  background: var(--bg);
 }
 
-.calendar-tier-outlook h3 {
+.calendar-tier-compact h3 {
   margin-bottom: 8px;
 }
 
@@ -462,40 +509,62 @@
   opacity: 0.8;
 }
 
-.outlook-row {
+.compact-plan-days-row {
   display: flex;
   gap: 4px;
 }
 
-.outlook-day-chip {
+.compact-plan-day {
   flex: 1;
   text-align: center;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 5px 2px;
+  background: var(--surface-2);
 }
 
-.outlook-day-weekday {
-  font-size: 10px;
+.compact-plan-day-weekday {
+  font-size: var(--text-2xs);
   color: var(--text);
   margin-bottom: 1px;
 }
 
-.outlook-day-icon {
-  font-size: 15px;
+.compact-plan-day-icon {
+  font-size: var(--text-base);
   line-height: 1.2;
 }
 
-.outlook-day-hint {
-  font-size: 10px;
+.compact-plan-day-session {
+  font-size: var(--text-2xs);
   color: var(--text-h);
   margin-top: 1px;
+}
+
+.compact-plan-day-duration {
+  font-size: var(--text-2xs);
+  color: var(--text);
+  margin-top: 1px;
+}
+
+/* Kern-Einheit (is_key_session) in der reduzierten Ansicht: komplett in Akzentfarbe statt der
+   gedämpften Sekundärfarbe, damit sie trotz der reduzierten Darstellung erkennbar bleibt. */
+
+.compact-plan-day.key-session {
+  border-color: var(--accent-border);
+}
+
+.compact-plan-day.key-session .compact-plan-day-icon,
+.compact-plan-day.key-session .compact-plan-day-session,
+.compact-plan-day.key-session .compact-plan-day-duration {
+  color: var(--accent);
 }
 
 /* Alles ab Woche 4 (einfachste Ebene) */
 
 .calendar-tier-far {
   opacity: 0.7;
+  padding: 12px 20px;
+  background: var(--bg);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -505,11 +574,11 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text);
   padding: 6px 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--surface-2);
 }
 
@@ -543,7 +612,7 @@
 
 /* --- Vereins-Slot-Einstellungen --- */
 
-.club-slots-settings h2 {
+.club-slots-settings h3 {
   text-align: left;
   margin-bottom: 12px;
 }
@@ -559,13 +628,13 @@
 .club-slots-table td {
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 
 .club-slots-table button {
   font: inherit;
   padding: 4px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--surface-2);
   cursor: pointer;
@@ -581,7 +650,7 @@
 .club-slot-form select {
   font: inherit;
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text-h);
@@ -590,9 +659,272 @@
 .club-slot-form button {
   font: inherit;
   padding: 6px 14px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--accent-border);
   background: var(--accent-bg);
   color: var(--text-h);
   cursor: pointer;
+}
+
+/* --- Leistung-Seite --- */
+
+.performance-view {
+  gap: 24px;
+}
+
+.performance-section-heading {
+  text-align: left;
+  margin-bottom: 12px;
+}
+
+.performance-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.performance-row:last-child {
+  margin-bottom: 0;
+}
+
+.performance-card {
+  flex: 1 1 320px;
+  text-align: left;
+}
+
+/* 1/2 : 1/2-Aufteilung für Trainingsbereitschaft + HRV & Ruhepuls (flex-grow-Verhältnis 1:1 statt
+   fester Prozentwerte, damit die Karten beim Umbruch auf schmalen Bildschirmen normal reagieren). */
+
+.performance-card-narrow {
+  flex: 1 1 320px;
+}
+
+.performance-card-wide {
+  flex: 1 1 400px;
+}
+
+.performance-card h3 {
+  text-align: left;
+  margin-bottom: 12px;
+}
+
+/* Trainingsbereitschaft (Heute-Seite): Gauge links, Empfehlungs-Kopfzeile rechts daneben -
+   Begründungs-Bullets/Override-Buttons folgen darunter in voller Kartenbreite (siehe TodayView.tsx). */
+
+.readiness-card-top {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.readiness-card-gauge-col {
+  flex: 0 0 auto;
+}
+
+.performance-metric-value {
+  font-size: var(--text-display);
+  font-weight: 600;
+  color: var(--text-h);
+  margin-bottom: 4px;
+}
+
+.performance-metric-caption {
+  font-size: var(--text-sm);
+  font-weight: 400;
+  color: var(--text);
+}
+
+.status-pill {
+  display: inline-block;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--accent-border);
+  color: var(--accent);
+  background: var(--accent-bg);
+  margin-bottom: 10px;
+}
+
+.performance-metric-row {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+/* HRV/Ruhepuls/Trainings-Load-28-Tage-Bilanz-Panel (Leistung-Seite, siehe HrvTrendPanel.tsx) -
+   drei gestapelte Small-Multiples mit gemeinsamer Zeitachse. */
+
+.hrv-trend-panel {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.hrv-trend-chart-title {
+  font-size: var(--text-2xs);
+  color: var(--text);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.hrv-trend-chart-canvas {
+  position: relative;
+  width: 100%;
+  height: 110px;
+}
+
+/* Range-Bar (HRV-Baseline, akute Belastung vs. Optimalbereich) - eine markierte Zone innerhalb
+   einer Skala + ein Marker für den aktuellen Wert. */
+
+.range-bar {
+  margin-top: 8px;
+}
+
+.range-bar-track {
+  position: relative;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--surface-2);
+}
+
+.range-bar-zone {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+  box-sizing: border-box;
+}
+
+.range-bar-marker {
+  position: absolute;
+  top: -3px;
+  width: 3px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--text-h);
+  transform: translateX(-50%);
+}
+
+.range-bar-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--text-2xs);
+  color: var(--text);
+  margin-top: 4px;
+}
+
+/* Belastungsfokus-Verteilung (Anaerob/Hoch-Aerob/Niedrig-Aerob) */
+
+.load-focus-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.load-focus-label {
+  flex: 0 0 90px;
+  font-size: var(--text-xs);
+  color: var(--text);
+}
+
+.load-focus-track {
+  flex: 1;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.load-focus-fill {
+  height: 100%;
+  background: var(--accent);
+}
+
+.load-focus-pct {
+  flex: 0 0 40px;
+  text-align: right;
+  font-size: var(--text-xs);
+  color: var(--text-h);
+}
+
+/* Ziel-Vergleich (Leistungsdiagnostik-Karten) */
+
+.goal-comparison {
+  font-size: var(--text-sm);
+  color: var(--text);
+  margin-top: 4px;
+}
+
+.goal-comparison.goal-met {
+  color: var(--accent);
+}
+
+.info-tooltip {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--text-sm);
+  color: var(--text);
+  margin-left: 6px;
+  cursor: help;
+}
+
+/* --- Responsive/Mobile --- */
+/* Eine Breakpoint-Stufe (≤768px, gängige Tablet/Phone-Grenze) reicht hier - die App hat keine
+   Layouts, die eine zweite Zwischenstufe bräuchten. Sidebar geht in den Icon-only-Zustand (nutzt
+   dieselben .sidebar.collapsed-Regeln wie der manuelle Einklapp-Toggle), unabhängig vom
+   JS-collapsed-State, da auf schmalen Bildschirmen für Text ohnehin kein Platz ist. */
+
+@media (max-width: 768px) {
+  .sidebar {
+    flex-basis: 72px;
+    padding: 24px 12px;
+  }
+
+  .sidebar-brand {
+    padding: 0;
+    justify-content: center;
+  }
+
+  .sidebar-brand-name,
+  .sidebar-nav-label {
+    display: none;
+  }
+
+  .sidebar-nav-item {
+    justify-content: center;
+    padding: 10px;
+  }
+
+  .sidebar-collapse-toggle {
+    display: none;
+  }
+
+  .main-content-body {
+    padding: 8px 16px 32px;
+  }
+
+  .top-bar {
+    padding: 16px 16px 12px;
+  }
+
+  .performance-row,
+  .readiness-card-top {
+    flex-direction: column;
+  }
+
+  .club-slots-table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
 }

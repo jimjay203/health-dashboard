@@ -2,10 +2,13 @@ import { useEffect, useState } from "react";
 import { fetchSyncStatus, type SyncStatus, type SyncStatusValue } from "./api";
 import type { View } from "./Sidebar";
 import type { ThemeChoice } from "./theme";
+import Icon from "./Icon";
 
 const PAGE_INFO: Record<View, { title: string; subtitle: string }> = {
   today: { title: "Heute", subtitle: "Dein Trainings-Status auf einen Blick." },
-  settings: { title: "Einstellungen", subtitle: "Vereins-Trainingstermine verwalten." },
+  week: { title: "Woche", subtitle: "Rolling-Horizon-Wochenplan und Trainingsphase." },
+  performance: { title: "Leistung", subtitle: "Trainingsdiagnostik, Belastungssteuerung und Schwellenwerte." },
+  settings: { title: "Einstellungen", subtitle: "Vereins-Trainingstermine und Leistungsziele verwalten." },
 };
 
 const SYNC_LABEL: Record<SyncStatusValue, { text: string; className: string }> = {
@@ -17,9 +20,9 @@ const SYNC_LABEL: Record<SyncStatusValue, { text: string; className: string }> =
 };
 
 const THEME_OPTIONS: { value: ThemeChoice; icon: string; label: string }[] = [
-  { value: "light", icon: "☀️", label: "Hell" },
-  { value: "system", icon: "🖥️", label: "System" },
-  { value: "dark", icon: "🌙", label: "Dunkel" },
+  { value: "light", icon: "light_mode", label: "Hell" },
+  { value: "system", icon: "desktop_windows", label: "System" },
+  { value: "dark", icon: "dark_mode", label: "Dunkel" },
 ];
 
 function formatClock(date: Date): string {
@@ -71,7 +74,7 @@ function ThemeToggle({ theme, onThemeChange }: { theme: ThemeChoice; onThemeChan
           title={option.label}
           onClick={() => onThemeChange(option.value)}
         >
-          {option.icon}
+          <Icon name={option.icon} />
         </button>
       ))}
     </div>

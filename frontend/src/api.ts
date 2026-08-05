@@ -2,25 +2,6 @@
 // des FastAPI+React-Rebuilds). Im Docker-Build liefert FastAPI selbst /api/* aus derselben
 // Origin aus, lokal übernimmt vite.config.ts den Dev-Proxy.
 
-export interface Readiness {
-  date: string;
-  score: number | null;
-  level: string | null;
-  feedback_short: string | null;
-}
-
-export interface TrendPoint {
-  date: string;
-  avg_hrv: number | null;
-  sleep_hours: number | null;
-  resting_hr: number | null;
-  body_battery_max: number | null;
-}
-
-export interface Trends {
-  days: TrendPoint[];
-}
-
 export interface Recommendation {
   date: string;
   recommendation_text: string;
@@ -52,12 +33,13 @@ export interface WeekStrip {
 export const SPORT_TYPES = ["Schwimmen", "Laufen", "Rad", "Krafttraining", "Mobility"] as const;
 export type SportType = (typeof SPORT_TYPES)[number];
 
-export const SPORT_TYPE_EMOJI: Record<SportType, string> = {
-  Schwimmen: "🏊",
-  Laufen: "🏃",
-  Rad: "🚴",
-  Krafttraining: "🏋️",
-  Mobility: "🧘",
+// Material-Symbols-Icon-Namen (siehe Icon.tsx) statt Emoji-Zeichen.
+export const SPORT_TYPE_ICON: Record<SportType, string> = {
+  Schwimmen: "pool",
+  Laufen: "directions_run",
+  Rad: "directions_bike",
+  Krafttraining: "fitness_center",
+  Mobility: "self_improvement",
 };
 
 export interface ClubSlot {
@@ -74,6 +56,8 @@ export type ClubSlotInput = Omit<ClubSlot, "id">;
 
 // --- Rolling-Horizon-Wochenplaner ---
 
+// is_key_session: null nur bei Wettkampftagen (nicht bewertbar) - sonst true/false vom Modell
+// eingeschätzt (siehe weekly_planner.py SYSTEM_PROMPT, Kern- vs. flexible Einheit).
 export interface WeeklyPlanDay {
   date: string;
   week_id: string;
@@ -83,6 +67,7 @@ export interface WeeklyPlanDay {
   target_zone: string | null;
   target_duration_minutes: number | null;
   target_distance_m: number | null;
+  is_key_session: boolean | null;
   is_club_slot: boolean;
   source: string | null;
   data_quality_flag: string | null;
@@ -92,6 +77,10 @@ export interface WeeklyPlan {
   week_id: string;
   week_start: string;
   week_end: string;
+  // Eigene, für DIESE Woche berechnete Phase (siehe weekly_planner.py::get_week_phase) - jede der
+  // drei Wochen-Ebenen im Kalender-Widget bekommt ihre eigene, korrekt für ihren eigenen
+  // Wochenstart berechnete Phase, keine geteilte/wiederverwendete.
+  training_phase: string | null;
   week_rationale_text: string | null;
   days: WeeklyPlanDay[];
 }
@@ -105,27 +94,6 @@ export interface UploadDraftResult {
   success: boolean;
   workout_id: number | null;
   error: string | null;
-}
-
-export interface TrainingOutlook {
-  week_id: string | null;
-  training_phase: string | null;
-  days_until_next_race: number | null;
-}
-
-// Woche 3: Andeutungs-Ebene, kein Gemini-Call (siehe weekly_planner.py::get_week_outlook).
-export interface WeekOutlookDay {
-  date: string;
-  weekday: number;
-  sport_type: string | null;
-  hint: string | null;
-}
-
-export interface WeekOutlook {
-  week_id: string;
-  week_start: string;
-  week_end: string;
-  days: WeekOutlookDay[];
 }
 
 // Ab Woche 4: eine Zeile pro Woche bis zum nächsten Rennen (siehe
@@ -148,6 +116,129 @@ export interface FarWeeksOutlook {
   weeks: FarWeekBar[];
 }
 
+// --- Leistung-Seite (Trainingsdiagnostik-KPIs) ---
+
+export interface HrvTrendPoint {
+  date: string;
+  avg_hrv: number | null;
+  resting_hr: number | null;
+  training_load: number | null;
+}
+
+export interface ReadinessOverview {
+  date: string;
+  score: number | null;
+  level: string | null;
+  feedback_short: string | null;
+  avg_hrv: number | null;
+  // Garmins eigene Einordnung ("BALANCED"/"UNBALANCED"/"LOW", "NONE" während der Onboarding-Phase
+  // des Geräts) - roh vom Backend durchgereicht.
+  hrv_status: string | null;
+  hrv_last_night_avg: number | null;
+  hrv_baseline_balanced_low: number | null;
+  hrv_baseline_balanced_upper: number | null;
+  resting_hr: number | null;
+  // Kein Garmin-Original-Status (den gibt es für den Ruhepuls nicht, anders als hrv_status) -
+  // nur der 7-Tage-Schnitt, aus dem das Frontend selbst eine Einordnung ableitet.
+  resting_hr_7d_avg: number | null;
+  hrv_trend: HrvTrendPoint[];
+}
+
+export interface LoadStatus {
+  // Datum, dessen Wert tatsächlich angezeigt wird (training_status wird nicht an jedem
+  // Sync-Tag neu geliefert - Backend fällt auf die letzte vorhandene Zeile zurück).
+  data_date: string | null;
+  training_status_label: string | null;
+  acute_training_load: number | null;
+  chronic_training_load: number | null;
+  chronic_load_min: number | null;
+  chronic_load_max: number | null;
+  acwr_status: string | null;
+  acwr_ratio: number | null;
+  // Alle drei bleiben None, falls Garmin die Verteilung für dieses Konto (noch) nicht liefert -
+  // siehe backend/routers/performance.py-Docstring (Ground-Truth-Fund).
+  load_focus_anaerobic_pct: number | null;
+  load_focus_high_aerobic_pct: number | null;
+  load_focus_low_aerobic_pct: number | null;
+}
+
+export interface Thresholds {
+  run_threshold_pace_sec_per_km: number | null;
+  run_threshold_hr: number | null;
+  run_threshold_date: string | null;
+  cycling_threshold_hr: number | null;
+  ftp_watts: number | null;
+  ftp_power_to_weight: number | null;
+  ftp_date: string | null;
+  vo2max_running: number | null;
+  vo2max_running_date: string | null;
+  vo2max_cycling: number | null;
+  vo2max_cycling_date: string | null;
+}
+
+export interface PerformanceGoal {
+  key: string;
+  label: string;
+  target_value: number;
+  unit: string;
+  derived_from_race_goal_id: number | null;
+  notes: string | null;
+  updated_at: string;
+}
+
+export type PerformanceGoalInput = Omit<PerformanceGoal, "updated_at">;
+
+export function fetchReadinessOverview(date: string): Promise<ReadinessOverview> {
+  return fetch(`/api/performance/readiness-overview/${date}`).then((res) => handle<ReadinessOverview>(res));
+}
+
+export function fetchLoadStatus(date: string): Promise<LoadStatus> {
+  return fetch(`/api/performance/load-status/${date}`).then((res) => handle<LoadStatus>(res));
+}
+
+export function fetchThresholds(): Promise<Thresholds> {
+  return fetch(`/api/performance/thresholds`).then((res) => handle<Thresholds>(res));
+}
+
+export function fetchPerformanceGoals(): Promise<PerformanceGoal[]> {
+  return fetch(`/api/performance/goals`).then((res) => handle<PerformanceGoal[]>(res));
+}
+
+export function savePerformanceGoal(goal: PerformanceGoalInput): Promise<PerformanceGoal> {
+  return fetch(`/api/performance/goals/${goal.key}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(goal),
+  }).then((res) => handle<PerformanceGoal>(res));
+}
+
+export function deletePerformanceGoal(key: string): Promise<{ success: boolean }> {
+  return fetch(`/api/performance/goals/${key}`, { method: "DELETE" }).then((res) =>
+    handle<{ success: boolean }>(res)
+  );
+}
+
+// Sekunden/km -> "4:31 min/km", konsistent für Ist- und Ziel-Pace verwendet.
+export function formatPace(secPerKm: number | null): string {
+  if (secPerKm === null) return "–";
+  const minutes = Math.floor(secPerKm / 60);
+  const seconds = Math.round(secPerKm % 60);
+  return `${minutes}:${String(seconds).padStart(2, "0")} min/km`;
+}
+
+// Garmins hrvSummary.status/trainingStatusFeedbackPhrase sind SCREAMING_SNAKE_CASE-Enums - reine
+// Lesbarkeits-Formatierung ("NO_STATUS_1" -> "No Status 1"), keine inhaltliche Übersetzung, da für
+// die meisten Werte keine verifizierte deutsche Entsprechung vorliegt. Geteilt zwischen TodayView
+// (HRV-Status) und PerformanceView (Trainingszustand/ACWR-Status).
+export function formatEnumLabel(raw: string | null): string | null {
+  if (!raw) return null;
+  return raw
+    .toLowerCase()
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
 export type SyncStatusValue = "not_started" | "checking" | "completed" | "gave_up" | "rate_limited";
 
 export interface SyncStatus {
@@ -163,14 +254,6 @@ async function handle<T>(res: Response): Promise<T> {
     throw new Error(body.detail ?? `HTTP ${res.status}`);
   }
   return (await res.json()) as T;
-}
-
-export function fetchReadiness(date: string): Promise<Readiness> {
-  return fetch(`/api/readiness/${date}`).then((res) => handle<Readiness>(res));
-}
-
-export function fetchTrends(date: string, days = 14): Promise<Trends> {
-  return fetch(`/api/trends/${date}?days=${days}`).then((res) => handle<Trends>(res));
 }
 
 export function fetchRecommendation(date: string): Promise<Recommendation> {
@@ -225,14 +308,6 @@ export function uploadWorkoutDraft(draftId: number): Promise<UploadDraftResult> 
   );
 }
 
-export function fetchTrainingOutlook(): Promise<TrainingOutlook> {
-  return fetch(`/api/training-outlook`).then((res) => handle<TrainingOutlook>(res));
-}
-
-export function fetchWeekOutlook(date: string): Promise<WeekOutlook> {
-  return fetch(`/api/week-outlook/${date}`).then((res) => handle<WeekOutlook>(res));
-}
-
 export function fetchFarWeeksOutlook(date: string): Promise<FarWeeksOutlook> {
   return fetch(`/api/far-weeks-outlook/${date}`).then((res) => handle<FarWeeksOutlook>(res));
 }
@@ -249,6 +324,20 @@ export function workoutBuilderUrl(draftId: number): string {
 // eine Tagesverschiebung (gleiche Konvention wie nextMondayIso()/weekAfterNextMondayIso() unten).
 export function formatShortDate(isoDate: string): string {
   return `${isoDate.slice(8, 10)}.${isoDate.slice(5, 7)}.`;
+}
+
+// Für die reduzierte Ansicht (Nächste/Übernächste Woche) - keine exakte Minutenzahl, sondern auf
+// glatte Viertel-/Halbstunden-Schritte gerundet ("20min"/"1,5 Std"), damit der grobe Zeitaufwand
+// pro Tag auf einen Blick einschätzbar ist, ohne die volle Detailtiefe der fixierten Woche.
+const DURATION_LADDER_MINUTES = [20, 30, 45, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330, 360];
+
+export function roundedDurationLabel(minutes: number): string {
+  const nearest = DURATION_LADDER_MINUTES.reduce((closest, step) =>
+    Math.abs(step - minutes) < Math.abs(closest - minutes) ? step : closest
+  );
+  if (nearest < 60) return `${nearest}min`;
+  const hours = nearest / 60;
+  return `${Number.isInteger(hours) ? hours : hours.toFixed(1).replace(".", ",")} Std`;
 }
 
 function formatIso(date: Date): string {
@@ -279,7 +368,7 @@ export function nextMondayIso(): string {
   return formatIso(nextMonday);
 }
 
-// Montag der übernächsten Kalenderwoche - für die Andeutungs-Ebene ("Woche 3") im Kalender-Widget.
+// Montag der übernächsten Kalenderwoche - für die "Übernächste Woche"-Ebene im Kalender-Widget.
 // Eigene Berechnung statt new Date(nextMondayIso()) - String->Date-Parsing würde als UTC-Mitternacht
 // interpretiert und könnte je nach Zeitzone einen Tag verschieben (siehe formatIso-Konvention oben).
 export function weekAfterNextMondayIso(): string {

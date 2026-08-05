@@ -1,15 +1,17 @@
 """
 Backend-Endpoints für die Heute-Ansicht (siehe PROJECT_OVERVIEW.md, "Heute-Ansicht"-Abschnitt):
-Readiness-Dial, Metrik-Trends, KI-Empfehlung inkl. Override, Wochenstreifen. Alle Handler sind
-synchrone def-Funktionen wie backend/routers/daily_summary.py - FastAPI/Starlette führt sie
-automatisch in einem Threadpool aus, kein asyncio.to_thread() nötig (anders als in auto_sync.py,
-das selbst im Event-Loop läuft).
+KI-Empfehlung inkl. Override, Wochenstreifen. Der Readiness-Score + Metrik-Trends kommen für die
+Heute-Seite mittlerweile aus GET /api/performance/readiness-overview/{date} (siehe
+backend/routers/performance.py - liefert zusätzlich HRV/Ruhepuls, die TodayView.tsx jetzt ebenfalls
+zeigt). Alle Handler sind synchrone def-Funktionen wie backend/routers/daily_summary.py -
+FastAPI/Starlette führt sie automatisch in einem Threadpool aus, kein asyncio.to_thread() nötig
+(anders als in auto_sync.py, das selbst im Event-Loop läuft).
 """
 from datetime import date, datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from db import get_connection
 from daily_recommendation import generate_daily_recommendation, get_cached_recommendation, \
@@ -23,59 +25,6 @@ def _validate_date(date_str):
         return datetime.strptime(date_str, "%Y-%m-%d").date()
     except ValueError:
         raise HTTPException(status_code=400, detail="Datum muss im Format YYYY-MM-DD sein.")
-
-
-# --- Readiness ---
-
-class ReadinessResponse(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    date: str
-    score: int | None = None
-    level: str | None = None
-    feedback_short: str | None = None
-
-
-@router.get("/readiness/{date_str}", response_model=ReadinessResponse)
-def get_readiness(date_str: str) -> ReadinessResponse:
-    _validate_date(date_str)
-    conn = get_connection()
-    row = conn.execute(
-        "SELECT date, score, level, feedback_short FROM garmin_training_readiness WHERE date = ?",
-        (date_str,)
-    ).fetchone()
-    conn.close()
-    if not row:
-        raise HTTPException(status_code=404, detail=f"Keine Readiness-Daten für {date_str}.")
-    return ReadinessResponse(**dict(row))
-
-
-# --- Trends ---
-
-class TrendPoint(BaseModel):
-    date: str
-    avg_hrv: float | None = None
-    sleep_hours: float | None = None
-    resting_hr: int | None = None
-    body_battery_max: int | None = None
-
-
-class TrendsResponse(BaseModel):
-    days: list[TrendPoint]
-
-
-@router.get("/trends/{date_str}", response_model=TrendsResponse)
-def get_trends(date_str: str, days: int = 14) -> TrendsResponse:
-    end = _validate_date(date_str)
-    start = end - timedelta(days=days - 1)
-    conn = get_connection()
-    rows = conn.execute(
-        "SELECT date, avg_hrv, sleep_hours, resting_hr, body_battery_max FROM garmin_daily "
-        "WHERE date >= ? AND date <= ? ORDER BY date ASC",
-        (start.isoformat(), end.isoformat())
-    ).fetchall()
-    conn.close()
-    return TrendsResponse(days=[TrendPoint(**dict(r)) for r in rows])
 
 
 # --- Empfehlung ---

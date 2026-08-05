@@ -1,11 +1,10 @@
 """
 Backend-Endpoints für den Rolling-Horizon-Wochenplaner (siehe weekly_planner.py,
-PROJECT_OVERVIEW.md "Wochenplaner"-Abschnitt): zwei konkret durchgeplante Wochen (Diese Woche +
-Nächste Woche, beide über GET /api/weekly-plan/{date}, inkl. week_id/KW), eine Andeutungs-Ebene
-für Woche 3 (GET /api/week-outlook/{date}, keine Workout-Details, kein Gemini-Call) sowie
-Workout-Entwurf-Status/-Upload, ein grober Trainingsphasen-/Renn-Countdown-Ausblick (GET
-/api/training-outlook) und ab Woche 4 eine Zeile pro Woche bis zum nächsten Rennen (GET
-/api/far-weeks-outlook/{date}, leer falls kein Rennen mehr ansteht).
+PROJECT_OVERVIEW.md "Wochenplaner"-Abschnitt): drei konkret durchgeplante Wochen (Diese Woche,
+Nächste Woche, Übernächste Woche - alle über GET /api/weekly-plan/{date}, inkl. week_id/KW/
+Trainingsphase; die beiden Zukunftswochen werden vom Frontend nur reduziert dargestellt, siehe
+WeeklyCalendarWidget.tsx) sowie Workout-Entwurf-Status/-Upload und ab Woche 4 eine Zeile pro Woche
+bis zum nächsten Rennen (GET /api/far-weeks-outlook/{date}, leer falls kein Rennen mehr ansteht).
 """
 import asyncio
 import json
@@ -15,7 +14,12 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from db import get_connection
-from weekly_planner import generate_weekly_plan, get_week_plan, get_week_outlook, get_far_weeks_outlook
+from weekly_planner import (
+    generate_weekly_plan,
+    get_week_plan,
+    get_week_phase,
+    get_far_weeks_outlook,
+)
 from workout_builder import build_interval_running_workout, build_steady_running_workout, upload_workout
 from garmin_auth import get_garmin_client
 
@@ -34,7 +38,9 @@ def _validate_date(date_str):
         raise HTTPException(status_code=400, detail="Datum muss im Format YYYY-MM-DD sein.")
 
 
-# --- Diese Woche (Fixierungs-Ebene) ---
+# --- Diese/Nächste/Übernächste Woche (dieselbe echte weekly_plan-Datengrundlage für alle drei -
+# Diese Woche wird in voller Detailtiefe angezeigt, die beiden Zukunftswochen reduziert, siehe
+# WeeklyCalendarWidget.tsx) ---
 
 class WeeklyPlanDay(BaseModel):
     date: str
@@ -45,6 +51,7 @@ class WeeklyPlanDay(BaseModel):
     target_zone: str | None = None
     target_duration_minutes: float | None = None
     target_distance_m: float | None = None
+    is_key_session: bool | None = None
     is_club_slot: bool
     source: str | None = None
     data_quality_flag: str | None = None
@@ -54,6 +61,7 @@ class WeeklyPlanResponse(BaseModel):
     week_id: str
     week_start: str
     week_end: str
+    training_phase: str | None = None
     week_rationale_text: str | None = None
     days: list[WeeklyPlanDay]
 
@@ -76,46 +84,15 @@ def get_weekly_plan(date_str: str) -> WeeklyPlanResponse:
 
     for row in rows:
         row["is_club_slot"] = bool(row["is_club_slot"])
+        row["is_key_session"] = bool(row["is_key_session"]) if row["is_key_session"] is not None else None
 
     return WeeklyPlanResponse(
         week_id=f"{iso_year}-W{iso_week:02d}",
         week_start=week_start.isoformat(),
         week_end=week_end.isoformat(),
+        training_phase=get_week_phase(date_str),
         week_rationale_text=rows[0]["week_rationale_text"] if rows else None,
         days=[WeeklyPlanDay(**row) for row in rows],
-    )
-
-
-# --- Woche 3: Andeutungs-Ebene (kein Gemini-Call, siehe weekly_planner.py::get_week_outlook) ---
-
-class WeekOutlookDay(BaseModel):
-    date: str
-    weekday: int
-    sport_type: str | None = None
-    hint: str | None = None
-
-
-class WeekOutlookResponse(BaseModel):
-    week_id: str
-    week_start: str
-    week_end: str
-    days: list[WeekOutlookDay]
-
-
-@router.get("/week-outlook/{date_str}", response_model=WeekOutlookResponse)
-def get_week_outlook_endpoint(date_str: str) -> WeekOutlookResponse:
-    d = _validate_date(date_str)
-    outlook = get_week_outlook(date_str)
-
-    iso_year, iso_week, iso_weekday = d.isocalendar()
-    week_start = d - timedelta(days=iso_weekday - 1)
-    week_end = week_start + timedelta(days=6)
-
-    return WeekOutlookResponse(
-        week_id=f"{iso_year}-W{iso_week:02d}",
-        week_start=week_start.isoformat(),
-        week_end=week_end.isoformat(),
-        days=[WeekOutlookDay(**day) for day in outlook],
     )
 
 
@@ -181,27 +158,6 @@ async def upload_workout_draft(draft_id: int) -> UploadDraftResponse:
     conn.commit()
     conn.close()
     return UploadDraftResponse(success=True, workout_id=result["workout_id"])
-
-
-# --- Makro-Ebene (Wochen 3-4): grober Trainingsphasen-Ausblick ---
-
-class TrainingOutlookResponse(BaseModel):
-    week_id: str | None = None
-    training_phase: str | None = None
-    days_until_next_race: int | None = None
-
-
-@router.get("/training-outlook", response_model=TrainingOutlookResponse)
-def get_training_outlook() -> TrainingOutlookResponse:
-    conn = get_connection()
-    row = conn.execute(
-        "SELECT week_id, training_phase, days_until_next_race FROM weekly_summary "
-        "ORDER BY week_start_date DESC LIMIT 1"
-    ).fetchone()
-    conn.close()
-    if not row:
-        return TrainingOutlookResponse()
-    return TrainingOutlookResponse(**dict(row))
 
 
 # --- Ab Woche 4: eine Zeile pro Woche bis zum nächsten Rennen (siehe weekly_planner.py::

@@ -28,6 +28,10 @@ def init_db():
         body_battery_min INTEGER,
         stress_avg INTEGER,
         steps INTEGER,
+        hrv_status TEXT,
+        hrv_last_night_avg INTEGER,
+        hrv_baseline_balanced_low INTEGER,
+        hrv_baseline_balanced_upper INTEGER,
         raw_json TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
@@ -161,12 +165,28 @@ def init_db():
             raw_json TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         """,
+        # most_recent_vo2max/most_recent_vo2max_cycling sind Legacy-Spalten, hier NICHT als
+        # kanonische VO2max-Quelle verwenden (siehe Ground-Truth-Fund in performance.py-Kommentar):
+        # bleiben in diesem API-Response eingebettet oft tagelang unverändert stehen, während
+        # garmin_max_metrics deutlich aktueller/zuverlässiger ist - garmin_max_metrics ist die
+        # kanonische Quelle für die Leistungsseite.
         "garmin_training_status": """
             date TEXT PRIMARY KEY,
             most_recent_vo2max REAL,
             most_recent_vo2max_cycling REAL,
             training_load_balance TEXT,
             training_status TEXT,
+            training_status_label TEXT,
+            training_status_code INTEGER,
+            acute_training_load REAL,
+            chronic_training_load REAL,
+            chronic_load_min REAL,
+            chronic_load_max REAL,
+            acwr_status TEXT,
+            acwr_ratio REAL,
+            load_focus_anaerobic_pct REAL,
+            load_focus_high_aerobic_pct REAL,
+            load_focus_low_aerobic_pct REAL,
             raw_json TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         """,
@@ -310,6 +330,7 @@ def init_db():
             target_zone TEXT,
             target_duration_minutes REAL,
             target_distance_m REAL,
+            is_key_session INTEGER,
             is_club_slot INTEGER,
             source TEXT,
             week_rationale_text TEXT,
@@ -319,6 +340,13 @@ def init_db():
     }
     for table_name, columns_sql in daily_tables.items():
         cursor.execute(f"CREATE TABLE IF NOT EXISTS {table_name} ({columns_sql})")
+
+    # is_key_session (Kern- vs. flexible Einheit, siehe weekly_planner.py SYSTEM_PROMPT) - nachträglich
+    # ergänzte Spalte, ALTER TABLE nötig für bereits bestehende Installationen (NULL = unbekannt/
+    # Renntag, nicht mit False/flexibel gleichzusetzen).
+    existing_columns = {row[1] for row in cursor.execute("PRAGMA table_info(weekly_plan)")}
+    if "is_key_session" not in existing_columns:
+        cursor.execute("ALTER TABLE weekly_plan ADD COLUMN is_key_session INTEGER")
 
     # Nachträgliche Spalten für bereits bestehende Installationen (CREATE TABLE IF NOT EXISTS
     # legt bei existierenden Tabellen keine neuen Spalten an).
@@ -353,6 +381,32 @@ def init_db():
     existing_columns = {row[1] for row in cursor.execute("PRAGMA table_info(garmin_training_status)")}
     if "most_recent_vo2max_cycling" not in existing_columns:
         cursor.execute("ALTER TABLE garmin_training_status ADD COLUMN most_recent_vo2max_cycling REAL")
+
+    # Trainingszustand/Belastungsfokus aus dem bisher nur als Roh-JSON gespeicherten
+    # training_status/training_load_balance geparst (siehe garmin_service.py::_fetch_advanced_health,
+    # "Leistung"-Seite) - vorher landeten diese Werte nie in eigenen, abfragbaren Spalten.
+    training_status_columns = {
+        "training_status_label": "TEXT", "training_status_code": "INTEGER",
+        "acute_training_load": "REAL", "chronic_training_load": "REAL",
+        "chronic_load_min": "REAL", "chronic_load_max": "REAL",
+        "acwr_status": "TEXT", "acwr_ratio": "REAL",
+        "load_focus_anaerobic_pct": "REAL", "load_focus_high_aerobic_pct": "REAL",
+        "load_focus_low_aerobic_pct": "REAL",
+    }
+    for column, coltype in training_status_columns.items():
+        if column not in existing_columns:
+            cursor.execute(f"ALTER TABLE garmin_training_status ADD COLUMN {column} {coltype}")
+
+    # HRV-Status (Garmins eigene "Balanced/Unbalanced"-Einordnung, nicht nur der rohe ms-Wert) -
+    # wird bereits per get_hrv_data() abgerufen, lag bisher nur ungenutzt im raw_json-Blob.
+    existing_columns = {row[1] for row in cursor.execute("PRAGMA table_info(garmin_daily)")}
+    hrv_status_columns = {
+        "hrv_status": "TEXT", "hrv_last_night_avg": "INTEGER",
+        "hrv_baseline_balanced_low": "INTEGER", "hrv_baseline_balanced_upper": "INTEGER",
+    }
+    for column, coltype in hrv_status_columns.items():
+        if column not in existing_columns:
+            cursor.execute(f"ALTER TABLE garmin_daily ADD COLUMN {column} {coltype}")
 
     existing_columns = {row[1] for row in cursor.execute("PRAGMA table_info(garmin_cycling_ftp)")}
     if "power_to_weight" not in existing_columns:
@@ -822,6 +876,41 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_withings_weigh_ins_date ON withings_weigh_ins(date)"
     )
 
+    # Leistungsziele (siehe "Leistung"-Seite/performance.py) - bewusst zwei getrennte Tabellen
+    # statt einer: race_goals sind renn-spezifisch (an einen konkreten Kalendereintrag gebunden),
+    # performance_goals sind generische, nicht renn-gebundene Leistungs-Benchmarks für die
+    # Vergleiche auf der Leistungsseite (z.B. Marathon-Pace-Ziel). performance_goals-Zeilen bleiben
+    # jederzeit manuell editierbar, auch wenn sie ursprünglich aus einem race_goals-Eintrag
+    # abgeleitet wurden (derived_from_race_goal_id ist reine Herkunfts-Info, keine Sperre).
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS race_goals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_id INTEGER NOT NULL REFERENCES garmin_scheduled_events(id),
+        target_time_seconds INTEGER,
+        target_splits_json TEXT,
+        rationale_text TEXT,
+        set_by TEXT NOT NULL DEFAULT 'user' CHECK(set_by IN ('user', 'ai_conversation')),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    # FTP-Ziel bewusst als W/kg (ftp_w_per_kg), nicht als reine Watt-Zahl - vergleichbar mit dem
+    # bereits körpergewichts-normalisierten power_to_weight-Ist-Wert aus garmin_cycling_ftp/
+    # garmin_lactate_threshold (siehe performance.py). Kein Ziel-VO2max - das ist ein
+    # Trainingsergebnis, kein Wert, auf den gezielt hintrainiert wird wie Pace/Watt.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS performance_goals (
+        key TEXT PRIMARY KEY,
+        label TEXT NOT NULL,
+        target_value REAL NOT NULL,
+        unit TEXT NOT NULL,
+        derived_from_race_goal_id INTEGER REFERENCES race_goals(id),
+        notes TEXT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -884,10 +973,14 @@ def save_garmin_data(data_dict):
     cursor = conn.cursor()
     cursor.execute("""
     INSERT INTO garmin_daily (
-        date, resting_hr, avg_hrv, sleep_score, sleep_hours, 
-        body_battery_max, body_battery_min, stress_avg, steps, raw_json
-    ) VALUES (:date, :resting_hr, :avg_hrv, :sleep_score, :sleep_hours, 
-              :body_battery_max, :body_battery_min, :stress_avg, :steps, :raw_json)
+        date, resting_hr, avg_hrv, sleep_score, sleep_hours,
+        body_battery_max, body_battery_min, stress_avg, steps,
+        hrv_status, hrv_last_night_avg, hrv_baseline_balanced_low, hrv_baseline_balanced_upper,
+        raw_json
+    ) VALUES (:date, :resting_hr, :avg_hrv, :sleep_score, :sleep_hours,
+              :body_battery_max, :body_battery_min, :stress_avg, :steps,
+              :hrv_status, :hrv_last_night_avg, :hrv_baseline_balanced_low, :hrv_baseline_balanced_upper,
+              :raw_json)
     ON CONFLICT(date) DO UPDATE SET
         resting_hr=excluded.resting_hr,
         avg_hrv=excluded.avg_hrv,
@@ -897,6 +990,10 @@ def save_garmin_data(data_dict):
         body_battery_min=excluded.body_battery_min,
         stress_avg=excluded.stress_avg,
         steps=excluded.steps,
+        hrv_status=excluded.hrv_status,
+        hrv_last_night_avg=excluded.hrv_last_night_avg,
+        hrv_baseline_balanced_low=excluded.hrv_baseline_balanced_low,
+        hrv_baseline_balanced_upper=excluded.hrv_baseline_balanced_upper,
         raw_json=excluded.raw_json;
     """, data_dict)
     conn.commit()
