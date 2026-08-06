@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from routers import daily_summary, sync_status, today, club_slots, weekly_plan, performance
+from routers import daily_summary, sync_status, today, club_slots, weekly_plan, performance, insight_memory
 from auto_sync import run_daily_auto_sync_forever
 from db import init_db
 
@@ -36,6 +36,7 @@ app.include_router(today.router)
 app.include_router(club_slots.router)
 app.include_router(weekly_plan.router)
 app.include_router(performance.router)
+app.include_router(insight_memory.router)
 
 
 @app.get("/api/health")

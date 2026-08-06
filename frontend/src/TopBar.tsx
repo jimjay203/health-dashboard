@@ -8,6 +8,7 @@ const PAGE_INFO: Record<View, { title: string; subtitle: string }> = {
   today: { title: "Heute", subtitle: "Dein Trainings-Status auf einen Blick." },
   week: { title: "Woche", subtitle: "Rolling-Horizon-Wochenplan und Trainingsphase." },
   performance: { title: "Leistung", subtitle: "Trainingsdiagnostik, Belastungssteuerung und Schwellenwerte." },
+  insights: { title: "Erkenntnisse", subtitle: "Erkenntnis-Gedächtnis: Zusatzinfos in deinen eigenen Worten." },
   settings: { title: "Einstellungen", subtitle: "Vereins-Trainingstermine und Leistungsziele verwalten." },
 };
 
@@ -122,10 +123,12 @@ function TopBar({
   view,
   theme,
   onThemeChange,
+  onMenuClick,
 }: {
   view: View;
   theme: ThemeChoice;
   onThemeChange: (t: ThemeChoice) => void;
+  onMenuClick: () => void;
 }) {
   const [now, setNow] = useState(new Date());
 
@@ -139,9 +142,16 @@ function TopBar({
   return (
     <div className="top-bar">
       <div className="top-bar-left">
-        <div className="top-bar-clock">{formatClock(now)}</div>
-        <h1 className="top-bar-title">{title}</h1>
-        <p className="top-bar-subtitle">{subtitle}</p>
+        {/* Nur auf schmalen Bildschirmen sichtbar (siehe App.css) - öffnet die Sidebar als
+            Drawer-Overlay, da dort für eine permanente Spalte kein Platz ist. */}
+        <button className="top-bar-menu-button" title="Menü öffnen" onClick={onMenuClick}>
+          <Icon name="menu" />
+        </button>
+        <div className="top-bar-heading">
+          <div className="top-bar-clock">{formatClock(now)}</div>
+          <h1 className="top-bar-title">{title}</h1>
+          <p className="top-bar-subtitle">{subtitle}</p>
+        </div>
       </div>
       <div className="top-bar-right">
         <SyncBadge />

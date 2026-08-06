@@ -280,6 +280,47 @@ export function fetchSwimDiagnostics(): Promise<SwimDiagnostics> {
   return fetch(`/api/performance/swim-diagnostics`).then((res) => handle<SwimDiagnostics>(res));
 }
 
+// --- Erkenntnisse (Schicht 3, insight_memory.py) ---
+
+export interface InsightMemoryVersion {
+  version: number;
+  updated_at: string;
+  compressed_text: string | null;
+}
+
+export type InsightSource = "user" | "claude_import" | "journal";
+
+export interface InsightRawEntry {
+  id: number;
+  created_at: string;
+  raw_text: string;
+  source: InsightSource;
+}
+
+export function fetchInsightMemoryCompressed(): Promise<InsightMemoryVersion[]> {
+  return fetch(`/api/insight-memory/compressed`).then((res) => handle<InsightMemoryVersion[]>(res));
+}
+
+export function fetchInsightMemoryRaw(): Promise<InsightRawEntry[]> {
+  return fetch(`/api/insight-memory/raw`).then((res) => handle<InsightRawEntry[]>(res));
+}
+
+// Läuft serverseitig blockierend bis Gemini die Verdichtung abgeschlossen hat (siehe
+// backend/routers/insight_memory.py) - das fetch-Promise löst sich entsprechend erst danach auf.
+export function addInsightMemoryEntry(rawText: string): Promise<InsightMemoryVersion> {
+  return fetch(`/api/insight-memory/raw`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ raw_text: rawText }),
+  }).then((res) => handle<InsightMemoryVersion>(res));
+}
+
+export function deleteInsightMemoryEntry(id: number): Promise<{ success: boolean }> {
+  return fetch(`/api/insight-memory/raw/${id}`, { method: "DELETE" }).then((res) =>
+    handle<{ success: boolean }>(res)
+  );
+}
+
 export function fetchPerformanceGoals(): Promise<PerformanceGoal[]> {
   return fetch(`/api/performance/goals`).then((res) => handle<PerformanceGoal[]>(res));
 }

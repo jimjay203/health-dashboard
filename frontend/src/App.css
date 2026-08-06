@@ -41,6 +41,14 @@
   justify-content: center;
 }
 
+/* Labels werden jetzt immer gerendert (siehe Sidebar.tsx) - eingeklappt blendet CSS sie aus statt
+   JSX sie wegzulassen, damit derselbe DOM-Baum im mobilen Drawer (siehe Responsive-Block unten)
+   unabhängig vom collapsed-Zustand einfach wieder eingeblendet werden kann. */
+.sidebar.collapsed .sidebar-brand-name,
+.sidebar.collapsed .sidebar-nav-label {
+  display: none;
+}
+
 .sidebar-brand-mark {
   width: 32px;
   height: 32px;
@@ -58,6 +66,28 @@
   font-weight: 600;
   color: var(--text-h);
   font-size: var(--text-base);
+  flex: 1;
+}
+
+/* Nur im mobilen Drawer sichtbar (siehe Responsive-Block unten) - auf dem Desktop ist die Sidebar
+   eine permanente Spalte, ein Schließen-Button ergibt dort keinen Sinn. */
+.sidebar-mobile-close {
+  display: none;
+  align-items: center;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  padding: 4px;
+}
+
+/* Nur gerendert, während der mobile Drawer offen ist (siehe Sidebar.tsx) - Klick schließt ihn,
+   gleichbedeutend mit dem X-Button oder einer Nav-Auswahl. */
+.sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 90;
 }
 
 .sidebar-nav {
@@ -141,6 +171,26 @@
   gap: 16px;
   padding: 24px 32px 16px;
   flex-wrap: wrap;
+}
+
+.top-bar-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+/* Nur relevant, wenn die Sidebar zum Mobile-Drawer wird (siehe Responsive-Block unten) - auf dem
+   Desktop bleibt die Sidebar eine permanente Spalte, ein zusätzlicher Öffnen-Button wäre dort
+   überflüssig. */
+.top-bar-menu-button {
+  display: none;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-h);
+  padding: 6px;
+  cursor: pointer;
 }
 
 .top-bar-clock {
@@ -1225,35 +1275,219 @@
   cursor: help;
 }
 
+/* --- Erkenntnisse-Seite (Schicht 3, insight_memory.py) --- */
+
+.insight-compressed-box {
+  white-space: pre-wrap;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text-h);
+  background: var(--surface-2);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+}
+
+.insight-history-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text);
+  background: none;
+  border: none;
+  padding: 10px 0 0;
+  cursor: pointer;
+}
+
+.insight-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.insight-history-entry {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.insight-history-version {
+  font-size: var(--text-2xs);
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.insight-history-text {
+  white-space: pre-wrap;
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.insight-entry-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.insight-entry-form textarea {
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text-h);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  min-height: 80px;
+  resize: vertical;
+}
+
+.insight-entry-form button {
+  align-self: flex-start;
+  font: inherit;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.insight-entry-form button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.insight-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-sm);
+  color: var(--text);
+  margin-top: 8px;
+}
+
+.insight-status-icon {
+  animation: sync-spin 0.8s linear infinite;
+}
+
+.insight-raw-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.insight-raw-entry {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+
+.insight-raw-entry:first-child {
+  border-top: none;
+}
+
+.insight-raw-entry-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-2xs);
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.insight-source-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.insight-raw-entry-text {
+  font-size: var(--text-sm);
+  color: var(--text-h);
+}
+
+.insight-raw-entry-delete {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  border: none;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  padding: 4px;
+}
+
+.insight-raw-entry-delete:hover {
+  color: #e5484d;
+}
+
 /* --- Responsive/Mobile --- */
 /* Eine Breakpoint-Stufe (≤768px, gängige Tablet/Phone-Grenze) reicht hier - die App hat keine
-   Layouts, die eine zweite Zwischenstufe bräuchten. Sidebar geht in den Icon-only-Zustand (nutzt
-   dieselben .sidebar.collapsed-Regeln wie der manuelle Einklapp-Toggle), unabhängig vom
-   JS-collapsed-State, da auf schmalen Bildschirmen für Text ohnehin kein Platz ist. */
+   Layouts, die eine zweite Zwischenstufe bräuchten. Die Sidebar ist auf dieser Breite keine
+   permanente Spalte mehr (der frühere Icon-only-Zustand nahm auf einem Phone-Screen unverhältnis-
+   mäßig viel horizontale Fläche weg), sondern ein per Hamburger-Button (TopBar) geöffneter
+   Drawer: position:fixed + transform statt flex-basis, per .mobile-open eingeblendet, per
+   Backdrop-Klick/X/Nav-Auswahl wieder geschlossen (siehe Sidebar.tsx). Zeigt dabei immer volle
+   Labels, unabhängig vom (rein Desktop-relevanten) collapsed-Zustand - als Overlay gibt es keinen
+   Platzgrund mehr für Icon-only. */
 
 @media (max-width: 768px) {
   .sidebar {
-    flex-basis: 72px;
-    padding: 24px 12px;
+    position: fixed;
+    top: 0;
+    left: 0;
+    flex-basis: 240px;
+    width: 240px;
+    height: 100svh;
+    z-index: 100;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.25);
   }
 
-  .sidebar-brand {
-    padding: 0;
-    justify-content: center;
+  .sidebar.mobile-open {
+    transform: translateX(0);
   }
 
-  .sidebar-brand-name,
-  .sidebar-nav-label {
-    display: none;
+  /* collapsed ist auf dem Desktop relevant (siehe sidebarCollapsed.ts) - im mobilen Drawer wird es
+     ignoriert, volle Labels bleiben immer sichtbar. */
+  .sidebar.collapsed {
+    flex-basis: 240px;
+    padding: 24px 16px;
   }
 
-  .sidebar-nav-item {
-    justify-content: center;
-    padding: 10px;
+  .sidebar.collapsed .sidebar-brand {
+    padding: 0 8px;
+    justify-content: flex-start;
+  }
+
+  /* Muss dieselbe Spezifität wie die Desktop-Ausblend-Regel oben treffen (.sidebar.collapsed
+     .sidebar-brand-name) - ein einfaches .sidebar-brand-name allein würde von dieser bereits
+     verlieren, egal in welcher Reihenfolge die Regeln im Stylesheet stehen. */
+  .sidebar.collapsed .sidebar-brand-name,
+  .sidebar.collapsed .sidebar-nav-label {
+    display: block;
+  }
+
+  .sidebar.collapsed .sidebar-nav-item {
+    justify-content: flex-start;
+    padding: 10px 12px;
+  }
+
+  .sidebar-mobile-close {
+    display: flex;
   }
 
   .sidebar-collapse-toggle {
     display: none;
+  }
+
+  .top-bar-menu-button {
+    display: flex;
   }
 
   .main-content-body {
