@@ -18,9 +18,11 @@ ORM), `garminconnect` (Garmin-API), `google-genai` (Gemini) für Schicht 3/4, Pl
 Charts/Karten, Docker Compose (`.:/app`-Volume-Mount, d.h. Code-Änderungen wirken ohne Rebuild).
 Daneben eine **parallele FastAPI+React-App** (`backend/`/`frontend/`, siehe eigener Abschnitt
 unten) als geplanter Rebuild - läuft als zweiter, unabhängiger Container neben dem
-Streamlit-Service, ersetzt ihn noch nicht. Mittlerweile mehr als ein leeres Grundgerüst: die
-Heute-Ansicht (Readiness-Dial, KI-Empfehlung, Metrik-Kacheln, Wochenstreifen) ist das erste echte
-Feature dort.
+Streamlit-Service, ersetzt ihn noch nicht. Mittlerweile deutlich mehr als ein leeres Grundgerüst:
+vier echte Seiten (Heute/Woche/Leistung/Einstellungen) mit eigener Sidebar-Navigation, einem
+konsistenten Design-System (Typografie-/Radius-Skala, Material-Symbols-Icons, Light/Dark/System-
+Theme, responsive für mobile Breiten) und einer umfangreichen Leistungsdiagnostik-Seite (siehe
+eigene Abschnitte unten).
 
 ## FastAPI+React-Rebuild
 
@@ -111,9 +113,27 @@ Settings bleibt unverändert als Fallback bestehen.
 
 ### Heute-Ansicht (Schritt 2): Empfehlungs-Engine, Vereins-Slots, Backend/Frontend
 
-Erstes echtes Feature der neuen App: Readiness-Dial, KI-Empfehlung mit Begründung, vier
-Metrik-Kacheln mit Sparklines, Wochenstreifen. Bewusster Neuaufbau, kein Wiederherstellen des
-früher entfernten `ai_coach.py`.
+Erstes echtes Feature der neuen App: Readiness-Dial, KI-Empfehlung mit Begründung. Bewusster
+Neuaufbau, kein Wiederherstellen des früher entfernten `ai_coach.py`.
+
+**Seither vereinfacht:** die ursprünglichen vier Metrik-Kacheln mit Sparklines wurden komplett
+entfernt (`Sparkline.tsx`, `fetchTrends`/`GET /api/trends/{date}` gelöscht - tote Code-Entfernung,
+kein Ersatz gebaut, die relevanten Werte stehen jetzt auf der Leistung-Seite). Das
+Rolling-Horizon-Kalender-Widget wurde auf eine eigene **"Woche"-Seite** ausgelagert
+(`WeekView.tsx`, eigener Sidebar-Eintrag) statt auf der Heute-Seite mitzulaufen. Die Heute-Seite
+zeigt seitdem nur noch zwei Karten nebeneinander: **Trainingsbereitschaft** (Readiness-Gauge +
+KI-Empfehlung inkl. Override-Buttons, siehe unten) und **HRV & Ruhepuls** (siehe
+Leistung-Seiten-Abschnitt weiter unten - dieselbe `readiness-overview`-Datengrundlage, nur anders
+angeordnet).
+- **Override-Buttons ("Fühle mich besser/schlechter"):** stoßen `POST /api/daily-override/{date}`
+  an, das `daily_recommendation.py::set_override_and_regenerate()` aufruft - Override wird in
+  `daily_override` gespeichert, danach wird die komplette Tagesempfehlung mit einem zusätzlichen
+  Kontext-Satz ("Der Athlet fühlt sich heute BESSER/SCHLECHTER als die Kennzahlen suggerieren")
+  neu bei Gemini angefragt. Kein manuelles Überschreiben des Readiness-Scores selbst (der bleibt
+  Garmins berechneter Wert) - nur die Empfehlung reagiert auf das subjektive Feedback. Frontend
+  blendet Empfehlungssatz/Begründungs-Bullets während der Neuberechnung auf reduzierte Deckkraft
+  ab (1,2s CSS-Transition) und wieder ein, plus ein "wird neu berechnet…"-Hinweis mit drehendem
+  Icon - reine UX-Rückmeldung, keine Server-Logik.
 
 - **`daily_recommendation.py`** (Repo-Root, kein `streamlit`-Import): `generate_daily_
   recommendation(target_date, override_value=None)` sammelt Kontext (heutige `daily_summary`-Zeile,
@@ -149,14 +169,14 @@ früher entfernten `ai_coach.py`.
   den bereits erfolgreichen Sync-Status nicht, wird nur geloggt. Ohne diesen Parameter würde
   `examples/test_auto_sync.py`s Fake-Orchestrierungstest bei jedem Lauf einen echten Gemini-Call
   auslösen; das Testskript nutzt daher einen Fake-`recommendation_fn`.
-- **`backend/routers/today.py`** (neu, bündelt alle 5 Endpoints - einzeln zu klein für je eine
-  eigene Datei): `GET /api/readiness/{date}` (liest `garmin_training_readiness`), `GET
-  /api/trends/{date}?days=14` (liest `garmin_daily`: `avg_hrv`/`sleep_hours`/`resting_hr`/
-  `body_battery_max` - **nur** `body_battery_max`, nicht `_min`, konsistent mit den anderen drei
-  Kacheln als je ein Tageswert), `GET /api/daily-recommendation/{date}` (Cache-Read, bei Miss
+- **`backend/routers/today.py`**: `GET /api/daily-recommendation/{date}` (Cache-Read, bei Miss
   einmalig **Lazy-Fallback**-Generierung), `POST /api/daily-override/{date}` (Body
   `{override_value}`, gibt die frisch regenerierte Empfehlung direkt zurück), `GET
-  /api/week-strip/{date}` (siehe Prioritätslogik unten). Alle als synchrone `def`-Handler wie
+  /api/week-strip/{date}` (siehe Prioritätslogik unten - aktuell ungenutzt vom Frontend, aber
+  nicht entfernt). `GET /api/readiness/{date}` und `GET /api/trends/{date}` wurden entfernt
+  (siehe "Heute-Ansicht seither vereinfacht" oben) - Readiness/HRV/Ruhepuls laufen jetzt über
+  `backend/routers/performance.py::readiness-overview` (siehe Leistung-Seiten-Abschnitt unten).
+  Alle als synchrone `def`-Handler wie
   `daily_summary.py` - FastAPI führt sie automatisch im Threadpool aus, kein
   `asyncio.to_thread()` nötig (anders als in `auto_sync.py`, das selbst im Event-Loop läuft).
 - **Wochenstreifen-Priorität** (`GET /api/week-strip/{date}`, Mo-So-Fenster lokal per
@@ -167,21 +187,70 @@ früher entfernten `ai_coach.py`.
   `rest` (Fallback). `is_today` ist ein **unabhängiges** Boolean-Feld, nicht Teil der Kette.
 - **`backend/routers/club_slots.py`** (neu): `GET`/`POST`/`PUT /{slot_id}`/`DELETE /{slot_id}` auf
   `/api/club-slots`, dünne Pydantic-Wrapper um `training_slots.py`.
-- **Frontend** (`frontend/src/`): `api.ts` (typisierte `fetch()`-Wrapper für alle 9 Endpoints),
-  `TodayView.tsx` (Readiness-Dial als Inline-SVG mit `stroke-dasharray`, Zonenfarbe nach `level`;
-  Empfehlungs-Panel mit den zwei Override-Buttons; vier Metrik-Kacheln mit handgerollten
-  Inline-SVG-Sparklines aus `/api/trends`, kein Chart-Framework; Wochenstreifen mit Icon/
-  Hervorhebung), `ClubSlotsSettings.tsx` (einfache Liste + Formular, lebt bewusst im neuen
-  Frontend statt in der alten Streamlit-Settings-Seite - die hat aktuell ohnehin keinerlei
-  CRUD-/Formular-Logik dieser Art). Styling in `App.css` (zuvor nie importiertes Vite-Boilerplate,
-  jetzt durch echte, an den bestehenden CSS-Custom-Properties orientierte Styles ersetzt).
-- **Live end-to-end verifiziert:** `generate_daily_recommendation()`/`set_override_and_regenerate()`
-  gegen echte Daten, alle 9 Endpoints per `curl` (inkl. Lazy-Fallback bei geleertem Cache, Club-Slot
+- **Frontend** (`frontend/src/`): `api.ts` (typisierte `fetch()`-Wrapper für alle Backend-
+  Endpoints), `TodayView.tsx` (Readiness-Gauge jetzt über `ReadinessGauge.tsx`, Chart.js-Doughnut
+  statt Hand-SVG, siehe Leistung-Seiten-Abschnitt unten für den Chart.js-Umstieg allgemein;
+  Empfehlungs-Panel mit den zwei Override-Buttons - Metrik-Kacheln/Sparklines/Wochenstreifen siehe
+  "seither vereinfacht" oben), `ClubSlotsSettings.tsx` (einfache Liste + Formular, lebt bewusst im
+  neuen Frontend statt in der alten Streamlit-Settings-Seite - die hat aktuell ohnehin keinerlei
+  CRUD-/Formular-Logik dieser Art; mittlerweile als `<tfoot>`-Zeile derselben Tabelle statt eines
+  separaten Formulars darunter, siehe Design-System-Abschnitt unten). Styling in `App.css`
+  (zuvor nie importiertes Vite-Boilerplate, jetzt durch echte, an den bestehenden
+  CSS-Custom-Properties orientierte Styles ersetzt, seitdem mehrfach um ein konsistentes
+  Design-System erweitert, siehe eigener Abschnitt unten).
+- **Live end-to-end verifiziert (damals):** `generate_daily_recommendation()`/`set_override_and_regenerate()`
+  gegen echte Daten, alle Endpoints per `curl` (inkl. Lazy-Fallback bei geleertem Cache, Club-Slot
   landet korrekt im Wochenstreifen am richtigen Wochentag, Renn-Tag behält Priorität), Docker-Build
   inkl. Frontend-Build (`tsc -b && vite build`) fehlerfrei, Streamlit-App/alte Tabellen unverändert
   (`git diff` auf `pages/`/`garmin_service.py`/`app.py` leer). Kein automatisierter Browser-/
   Interaktionstest (kein Browser-Automatisierungswerkzeug verfügbar) - nur indirekt über
   API-Response-Form vs. TypeScript-Interfaces und erfolgreichen Asset-Abruf bestätigt.
+
+## Design-System & Navigation (Frontend)
+
+Späterer, umfangreicher Cleanup-Durchgang über die gesamte React-App (Typografie, Farben, Icons,
+Navigation, Responsive) - betrifft `frontend/src/index.css`/`App.css` app-weit, nicht nur einzelne
+Seiten.
+
+- **Typografie-/Radius-Skala** (`index.css`): feste CSS-Custom-Property-Stufen statt beliebiger
+  px-Werte pro Stelle - `--text-2xs` (11px) bis `--text-xl` (28px), plus `--text-display` (28px,
+  für große Kennzahlen wie den Readiness-Score) und `--text-headline` (22px, für die
+  Empfehlungs-Kernaussage - bewusst kein eigenes Überschriften-Level). `--radius-sm/md/lg/pill`
+  analog. **Überschriften-Hierarchie app-weit fest zugeordnet:** h1 = Seitentitel (TopBar, genau
+  einmal pro Seite), h2 = Abschnitts-Überschrift (gruppiert mehrere Karten), h3 = Karten-Titel
+  (genau einer pro Karte) - keine Ausnahmen, jede Karte/jedes Settings-Formular nutzt konsequent
+  h3, auch wenn sie visuell wie ein Abschnitt wirken (z.B. "Diese Woche" im Kalender-Widget lief
+  vorher fälschlich als h2).
+- **Material Symbols statt Emoji** (`Icon.tsx`, npm-Paket `material-symbols`, self-hosted -
+  bewusst keine Google-Fonts-CDN-Abhängigkeit): Ligature-Icons per `<Icon name="..." />`, ersetzt
+  alle bunten Emoji-Zeichen app-weit (Sidebar-Navigation, Sportart-Icons, Renn-/Ruhetag-Icons,
+  Theme-Toggle, Sync-Button, Badges). `SPORT_TYPE_ICON` in `api.ts` (vorher `SPORT_TYPE_EMOJI`)
+  mappt die festen `SPORT_TYPES`-Werte auf Icon-Namen.
+- **Einklappbare Sidebar** (`sidebarCollapsed.ts`, gleiches Hook-Muster wie `theme.ts::useTheme()`,
+  localStorage-persistiert): eingeklappt bleiben nur die Icons sichtbar, Toggle-Button unten in der
+  Sidebar.
+- **Einheitliche Akzentfarbe:** `--accent` ist app-weit (Light/Dark/System/explizit) auf `#3dd68c`
+  vereinheitlicht - dieselbe Farbe wie `LEVEL_COLORS.HIGH` im Trainingsbereitschaft-Gauge
+  (`ReadinessGauge.tsx`), vorher wich vor allem der Hellmodus (`#16a34a`) sichtbar davon ab.
+  Dieselbe Grün/Orange/Rot-Ampel (`--accent` / `#f5a623` / `#e5484d`) wird durchgängig für
+  Status-Kacheln, Chart-Farben (siehe Leistung-Seiten-Abschnitt unten) und die Override-Buttons
+  verwendet - kein separates Farbschema pro Komponente. Pillen (`.status-pill`, `.day-score-pill`)
+  sind auf dieselbe Optik angeglichen (Rand+Text in der Statusfarbe, halbtransparente Füllung
+  derselben Farbe als Hintergrund, per `${color}1a`-Hex-Suffix-Technik berechnet, kein
+  fixes `--accent-bg` für dynamisch eingefärbte Pillen).
+- **Responsive/Mobile:** ein Breakpoint bei 768px - Sidebar erzwingt Icon-only-Darstellung
+  (unabhängig vom manuellen Einklapp-Status), reduziertes `.main-content-body`-Padding,
+  zweispaltige Kartenreihen brechen auf eine Spalte um, Tabellen (`.club-slots-table`) bekommen
+  horizontales Scrollen.
+- **"Woche"-Seite** (`WeekView.tsx`, eigener Sidebar-Eintrag): das Rolling-Horizon-Kalender-Widget
+  lief anfangs auf der Heute-Seite mit, wurde aber auf eine eigene Seite ausgelagert (siehe
+  "Heute-Ansicht seither vereinfacht" oben).
+- **Konsistente Rahmen-/Abgrenzung statt Kästen:** Unterabschnitte innerhalb einer Karte (z.B.
+  Diagnostik/Ziel-Tracking/Wettkampf-Prognose auf der Leistung-Seite, siehe unten) werden per
+  `border-top`-Trennlinie abgegrenzt, nicht per eigenem grauem Hintergrund-Kasten - gleiches
+  Prinzip wie die Tier-Trennung im Kalender-Widget (`.calendar-tier`). Die Trennlinie läuft dabei
+  über einen negativen Rand bis zum Kartenrand durch (kompensiert das Karten-Padding), statt an der
+  inneren Polsterung zu stoppen.
 
 ## Sync-Architektur
 
@@ -421,17 +490,137 @@ zusätzlich sein Kalenderdatum, jede Wochen-Überschrift die ISO-Kalenderwoche (
   Live gegen echte Daten verifiziert (Stand 05.08.2026): die Liste reicht bis KW 37
   (07.-13.09.2026), der Woche des SWB Marathon Bremen am 13.09.2026, letzter Balken zeigt
   "swb-Marathon Bremen (13.09.)" statt einer Trainingsphase - exakt wie erwartet.
-- **Frontend:** `WeeklyCalendarWidget.tsx` ersetzt die bisherigen `TomorrowCard`/`WeekStripView`-
-  Sektionen in `TodayView.tsx` durch die vier oben beschriebenen Ebenen, alle auf derselben
-  `fetchWeeklyPlan()`-Datengrundlage. `PlanDay` (volle Detailtiefe, "Diese Woche") und
-  `CompactPlanDay` (reduziert, Nächste/Übernächste Woche) sind zwei getrennte Komponenten auf
-  demselben `WeeklyPlanDay`-Typ; `shortSessionLabel()` schneidet für die kompakte Ansicht die
-  Klammer-Begründung vom `session_type`-Text ab (`"Langer Lauf (Marathon-Vorbereitung)"` ->
-  `"Langer Lauf"`), `roundedDurationLabel()` (in `api.ts`) rundet `target_duration_minutes` auf
-  eine feste Viertel-/Halbstunden-Leiter (20/30/45min, dann 30min-Schritte). `daily_recommendation.
-  py::_gather_context` bekommt einen neuen `weekly_plan_block`-Baustein (in `context_blocks.py`,
-  geteilt) - prüft zuerst, ob heute ein Club-Slot ist (dann kein zusätzlicher Wochenplan-Kontext
-  nötig), sonst der generierte Wochenplan-Vorschlag für heute.
+- **Frontend:** `WeeklyCalendarWidget.tsx` (lebt mittlerweile auf einer eigenen "Woche"-Seite,
+  siehe Design-System-Abschnitt oben, nicht mehr auf der Heute-Seite) zeigt die vier oben
+  beschriebenen Ebenen, alle auf derselben `fetchWeeklyPlan()`-Datengrundlage. `PlanDay` (volle
+  Detailtiefe, "Diese Woche") und `CompactPlanDay` (reduziert, Nächste/Übernächste Woche) sind zwei
+  getrennte Komponenten auf demselben `WeeklyPlanDay`-Typ; `shortSessionLabel()` schneidet für die
+  kompakte Ansicht die Klammer-Begründung vom `session_type`-Text ab (`"Langer Lauf
+  (Marathon-Vorbereitung)"` -> `"Langer Lauf"`), `roundedDurationLabel()` (in `api.ts`) rundet
+  `target_duration_minutes` auf eine feste Viertel-/Halbstunden-Leiter (20/30/45min, dann
+  30min-Schritte). `daily_recommendation.py::_gather_context` bekommt einen neuen
+  `weekly_plan_block`-Baustein (in `context_blocks.py`, geteilt) - prüft zuerst, ob heute ein
+  Club-Slot ist (dann kein zusätzlicher Wochenplan-Kontext nötig), sonst der generierte
+  Wochenplan-Vorschlag für heute.
+- **Manuelles "Woche neu generieren"** (`POST /api/weekly-plan/{date}/regenerate`): eine Woche
+  wurde bisher nur **einmalig** generiert und dann dauerhaft gecacht (`get_week_plan()`-Treffer
+  verhindert jede weitere Generierung) - nachträglich angelegte Vereins-Trainingstermine flossen
+  dadurch nur in noch nie generierte Wochen ein, nicht in bereits bestehende. Der neue Endpoint
+  erzwingt eine Neu-Generierung unabhängig vom Cache-Zustand (`generate_weekly_plan()` schreibt
+  ohnehin per `upsert_daily_metric()` über `date` als PK, kein vorheriges Löschen von `weekly_plan`
+  nötig). Zählt vorher, wie viele `weekly_plan_workout_draft`-Zeilen der Woche bereits
+  `uploaded_at IS NOT NULL` haben, und gibt das als `already_uploaded_count` zurück - das Frontend
+  (Refresh-Icon-Button neben jeder der drei Wochen-Ebenen) warnt dann sichtbar, dass zwar der
+  lokale Entwurf ersetzt wurde, der bereits bestehende Garmin-Termin selbst aber unangetastet
+  bleibt (kein automatisches Zurückziehen alter Uploads).
+
+## Leistung-Seite (`backend/routers/performance.py`, `PerformanceView.tsx`)
+
+Vierte Sidebar-Seite ("Leistung") - Trainingsdiagnostik-KPIs, wöchentliche Belastungssteuerung und
+Leistungsziele an einem Ort. Zentrale Backend-Datei `backend/routers/performance.py` (drei Blöcke:
+tägliche Bereitschaft, Wochen-Steuerung/Belastung, Leistungsdiagnostik & Schwellenwerte inkl. Ziele)
+- alle Endpoints unter `/api/performance/*`, lesend, kein eigener Sync-Trigger. Karten sind zwei
+  Breitenklassen (`performance-card-narrow`/`-wide`), von HrvCard/ReadinessGauge auf der Heute-Seite
+  mitverwendet (siehe dortiger Abschnitt).
+
+- **Trainingszustand (CTL/ATL/TSB, TrainingPeaks-PMC-Stil):** ersetzt Garmins eigene Trainingszustand-
+  Klassifizierung vollständig. **Ground-Truth-Fund:** `garmin_training_status` (Garmins
+  `get_training_status()`-Endpoint) erwies sich als grundsätzlich unzuverlässig für dieses Konto -
+  zwei unabhängige Syncs desselben Kontos am selben Tag lieferten einmal `"NO_STATUS_1"`, einmal
+  komplett `null` (`mostRecentVO2Max`/`mostRecentTrainingLoadBalance`/`mostRecentTrainingStatus`
+  allesamt leer). Ursache vermutlich: das Konto hat **zwei** als `primaryTrainingCapable` markierte
+  Geräte (Forerunner 970 Uhr + Edge 850 Radcomputer), was Garmins Backend bei der Zuordnung
+  offenbar verwirrt. Statt auf dieses eine wacklige Feld zu bauen, berechnet `_classify_training_state
+  (tsb)` die Einordnung selbst aus `daily_summary.ctl`/`atl`/`tsb` (bereits unconditional für jeden
+  synchronisierten Tag berechnet, siehe Schicht-1-Abschnitt) über eine fünfstufige `TSB_BANDS`-
+  Tabelle (Hohes Ermüdungsrisiko/Produktiv/Erhaltend/Frisch/Formverlust-Risiko) - dieselbe fachliche
+  Grundlage wie Garmins eigene Klassifizierung, nur ohne die Abhängigkeit vom einzelnen Endpoint.
+  `TrainingStateRow` (`PerformanceView.tsx`, Strava-Stil) zeigt CTL/ATL/TSB je mit farbigem Punkt +
+  Label nebeneinander; `CtlTrendChart` (Chart.js Line, `GET /api/performance/ctl-trend`, 180 Tage)
+  zeigt den Verlauf - CTL sichtbar, ATL/TSB per `hidden: true` erstmal ausgeblendet, über die
+  Chart.js-Legende manuell zuschaltbar.
+- **Belastungsfokus-Verteilung (Niedrig-/Hoch-Aerob/Anaerob):** gleicher Grund wie oben -
+  **Ground-Truth-Fund:** Garmins `metricsTrainingLoadBalanceDTOMap` war für dieses Konto in **jedem**
+  bisher synchronisierten Tag `null`. `_compute_load_focus()` berechnet die Verteilung stattdessen
+  selbst aus `garmin_activities.hr_zone_1..5` über ein rollierendes 28-Tage-Fenster
+  (`LOAD_FOCUS_WINDOW_DAYS`, gleiche Fensterlänge wie `daily_summary.training_load_28d`) - Z1+Z2 =
+  Niedrig-Aerob, Z3 = Hoch-Aerob, Z4+Z5 = Anaerob (dieselbe 3-Zonen-Polarisierungslogik wie
+  `weekly_summary.py`). Bleibt nur dann `None`, wenn im Fenster wirklich keine Aktivität mit
+  HF-Zonen-Daten vorliegt. `LoadFocusBars` stellt die drei Werte als farbige Balken dar (Grün/Orange/
+  Rot, dieselbe Ampel wie überall sonst, siehe Design-System-Abschnitt) mit einer Zielmarkierung bei
+  `POLARIZATION_MIN_Z1_Z2_PCT`.
+- **Pro-Sportart-Karten** (`RunPerformanceCard`/`BikePerformanceCard`/`SwimPerformanceCard`), jede in
+  drei per `border-top`-Linie getrennte Unterabschnitte (`Subsection`, siehe Design-System-Abschnitt):
+  - **Diagnostik:** aktuelle Schwellenwerte aus `GET /api/performance/thresholds` (kontostandsweite
+    "aktuellste Zeile", kein bestimmtes Datum - Lauf-Schwellenpace/-HF aus `garmin_lactate_threshold`
+    (Pace aus der bereits ×10-korrigierten `speed`-Spalte, siehe Bugfix unten), Rad-Schwellen-HF aus
+    derselben Tabelle, FTP + W/kg aus `garmin_cycling_ftp`, VO2max Laufen/Rad **bewusst aus
+    `garmin_max_metrics`, nicht `garmin_training_status.most_recent_vo2max*`** - Ground-Truth-Fund:
+    Letzteres blieb in der Garmin-Antwort oft tagelang eingefroren auf einen Wert, inkl. eines
+    verdächtig identischen Lauf-/Rad-Werts, während `garmin_max_metrics` deutlich aktueller ist.
+    Schwimmen bekommt eine eigene `GET /api/performance/swim-diagnostics` (SWOLF + Pace/100m der
+    letzten `lap_swimming`-Aktivität) - SWOLF hat keine eigene Spalte, wird per `json_extract(raw_json,
+    '$.averageSwolf')` gelesen statt einer neuen Sync-Spalte+Backfill.
+  - **Ziel-Tracking & Fortschritt:** siehe Leistungsziele-Formular unten, gefiltert auf zur Sportart
+    passende `key`s.
+  - **Wettkampf-Prognose**, bewusst zwei unterschiedliche Ansätze je nach Datenlage:
+    - **Laufen:** echter Garmin-Race-Predictor, `GET /api/performance/race-predictions` liest die
+      neueste `garmin_race_predictions`-Zeile (5k/10k/Halbmarathon/Marathon-Zeiten) unverändert durch
+      - keine eigene Modellierung nötig, Garmin liefert das bereits.
+    - **Rad:** **kein Garmin-Pendant** zum Lauf-Race-Predictor. `GET /api/performance/cycling-
+      prediction` schätzt stattdessen datengetrieben statt physikalisch: ein persönlicher
+      Wirkungsgrad (km/h pro Watt), gemittelt über die eigenen Rad-Aktivitäten mit Leistungs- UND
+      Geschwindigkeitsdaten, gefiltert auf **flaches Profil** (`CYCLING_FLAT_ELEVATION_GAIN_PER_KM =
+      10.0` m Höhenmeter/km - ground-truth an den eigenen 8 Aktivitäten geprüft: 6 klar darunter
+      (1-4 m/km), 2 klar darüber (12-13 m/km), keine Grenzfälle) - hügelige Fahrten würden den
+      Wirkungsgrad sonst verzerren, da gleiche Watt bergauf weniger km/h ergeben. Angewendet auf zwei
+      feste Szenarien (`CYCLING_PREDICTION_SCENARIOS`: Sprint 20km@95%FTP, Olympisch 40km@88%FTP).
+      `sample_size` wird transparent mit ausgegeben, damit sichtbar bleibt, dass die Schätzung mit
+      mehr Fahrten belastbarer wird - bewusst kein Wind-/Aerodynamik-Modell, das bleibt eine grobe
+      Tendenz.
+    - **Schwimmen:** keine Wettkampf-Prognose - es gibt keine vergleichbare Datenquelle (weder
+      CSS-Pace noch eine kritische Schwimm-Herzfrequenz werden synchronisiert), bewusst nicht
+      erfunden statt geraten (siehe Anti-Fabrikations-Prinzip, offene Baustelle unten).
+- **Leistungsziele-Formular** (`performance_goals.py`, Repo-Root, kein `streamlit`-Import; CRUD-
+  Endpoints in `backend/routers/performance.py`, UI in `PerformanceGoalsSettings.tsx` auf der
+  Einstellungen-Seite): `performance_goals` hat einen natürlichen TEXT-`key` (z.B.
+  `marathon_pace`) statt einer AUTOINCREMENT-`id` - Zeilen bleiben jederzeit manuell editierbar. Der
+  Key wird im Formular bewusst als **feste Dropdown-Liste** (`KNOWN_GOAL_KEYS`) statt Freitext
+  angeboten - ein Tippfehler im Key machte das Ziel vorher unbemerkt wirkungslos, da er der
+  Join-Schlüssel zu `GOAL_METRIC_SOURCES` ist. Eingabeformate sind pro Einheit unterschiedlich und
+  weichen bewusst vom internen Speicherformat ab: Pace-Ziele (`sec/km`/`sec/100m`) werden als
+  `mm:ss` eingegeben/angezeigt (`parsePaceToSeconds`/`formatSecondsToPace`), `W/kg` mit deutschem
+  Komma (`parseGermanDecimal`/`formatGermanDecimal`) - beide Helfer + `isPaceUnit`/`unitDisplayLabel`/
+  `formatGoalValue` liegen zentral in `api.ts`, geteilt zwischen Formular und Anzeige.
+  `GOAL_METRIC_SOURCES` (Dict in `backend/routers/performance.py`) mappt vier der fünf Key-Presets
+  auf eine echte, laufend synchronisierte Garmin-Quelle (`run_threshold_pace`→
+  `garmin_lactate_threshold.speed`, `ftp_w_per_kg`→`garmin_cycling_ftp.power_to_weight`,
+  `marathon_pace`/`halbmarathon_pace`→`garmin_race_predictions`-Zeiten/Distanz) - `swim_pace_100m`
+  ist bewusst **nicht** darin (andere Tabellenform, kein `date`-PK, mehrere/keine Aktivitäten pro
+  Tag), bekommt eine eigene `_swim_pace_value()`-Funktion mit identischer Fallback-Logik.
+  **Impliziter Start-Fortschritt:** `_enrich_goal()` ruft `_metric_value(conn, key, before_date=
+  goal.get("start_date") or "0001-01-01")` - das Sentinel-Datum löst den bestehenden "vor der
+  ersten Messung → nimm die allererste" Fallback aus, sodass ein Ziel **auch ohne explizit gesetztes
+  Startdatum** eine Fortschrittsanzeige bekommt (früheste verfügbare Messung als impliziter Start).
+  Bewusst als separates `start_value_date`-Response-Feld gehalten statt `start_date` selbst zu
+  überschreiben - ein impliziter Fallback soll beim nächsten Speichern nicht versehentlich als
+  "manuell gesetztes Startdatum" persistiert werden. `GoalProgressBar` (`PerformanceView.tsx`) zeigt
+  "(früheste verfügbare Messung)" als Hinweis, wenn `start_date !== start_value_date`.
+
+**Zwei Backend-Bugfixes im Rahmen dieser Seite gefunden:**
+- **`dashboard-v2` rief `init_db()` nie auf:** auf einem frischen Mac-mini-Deploy (kein Streamlit-
+  Seitenaufruf vorher) fehlten sämtliche Tabellen ("no such table: weekly_plan") - `dashboard-v2`
+  verließ sich implizit auf Streamlits seitenaufruf-zeitpunktbedingte Schema-Erstellung über dasselbe
+  `./data`-Volume. Fix: `init_db()` wird jetzt zusätzlich in FastAPIs `lifespan`-Handler
+  (`backend/main.py`) aufgerufen, bevor der Auto-Sync-Task startet.
+- **Selbstheilende Migration für historisch falsche Lactate-Threshold-`speed`-Werte:** Garmins
+  Rohwert war für `garmin_lactate_threshold.speed` intermittierend um Faktor 10 zu klein (bekannter,
+  in `garmin_service.py` bereits für künftige Syncs korrigierter Bug - historische Zeilen blieben
+  aber unkorrigiert). `db.py::init_db()` bekam einen einmaligen, bei jedem Container-Start
+  ausgeführten Migrations-Block: `UPDATE garmin_lactate_threshold SET speed = speed * 10 WHERE speed
+  IS NOT NULL AND speed < 1.0` (1.0 m/s ≈ 16:40 min/km, plausibel unterhalb jeder realen Lauf-
+  Schwellenpace) - korrigiert unkorrigierte Altzeilen automatisch, ohne manuellen SQL-Eingriff.
+  Verifiziert mit einer synthetisch eingefügten Testzeile (`0.369` → nach `init_db()` `3.69`).
 
 ## Die vier "Schichten" der KI-Chat-Vorbereitung
 
@@ -565,6 +754,7 @@ zeigt `tool_calls_json` je Antwort in einem Debug-Expander). CLI-Alternative: `e
 | `context_blocks.py` | Wiederverwendbare Gemini-Kontext-Bausteine (u.a. `strip_markdown_fences`), geteilt von chat_engine.py/daily_recommendation.py/weekly_planner.py |
 | `daily_recommendation.py` | Heute-Ansicht: Gemini-generierte Tagesempfehlung inkl. Override-Regenerierung |
 | `training_slots.py` | CRUD für wiederkehrende Vereins-Trainingstermine (club_training_slots) |
+| `performance_goals.py` | CRUD für Leistungsziele (performance_goals, TEXT-Key statt id) |
 | `withings_auth.py` | Withings-OAuth2-Token-Caching per requests (kein SDK, siehe Ground-Truth-Fund oben) |
 | `withings_service.py` | Holt Withings-Waagen-Messwerte direkt (Körperfett/Muskelmasse/Wasseranteil/Knochenmasse) |
 | `examples/test_workout_builder.py` | Beispiel: einfaches Intervall-Workout (build_interval_running_workout), `python3 -m examples.test_workout_builder` |
@@ -582,21 +772,37 @@ zeigt `tool_calls_json` je Antwort in einem Debug-Expander). CLI-Alternative: `e
 | `backend/main.py` | FastAPI-Rebuild Schritt 1: Einstiegspunkt, bindet Router + StaticFiles, startet den Auto-Sync-Hintergrund-Task |
 | `backend/routers/daily_summary.py` | `GET /api/daily-summary/{date}` (liest daily_summary direkt) |
 | `backend/routers/sync_status.py` | `GET /api/sync-status`, `POST /api/sync-trigger` (siehe auto_sync.py) |
-| `backend/routers/today.py` | Heute-Ansicht: readiness/trends/daily-recommendation/daily-override/week-strip (5 Endpoints) |
+| `backend/routers/today.py` | Heute-Ansicht: daily-recommendation/daily-override/week-strip (readiness/trends entfernt, siehe performance.py) |
 | `backend/routers/club_slots.py` | CRUD auf /api/club-slots (siehe training_slots.py) |
-| `backend/routers/weekly_plan.py` | Wochenplaner-Endpoints: weekly-plan (Diese/Nächste/Übernächste Woche)/workout-draft/far-weeks-outlook (siehe weekly_planner.py) |
-| `frontend/src/App.tsx` | Ansichtsumschalter (Heute/Einstellungen), kein Routing |
-| `frontend/src/TodayView.tsx` | Heute-Ansicht: Readiness-Dial, Empfehlungs-Panel, Metrik-Kacheln, Kalender-Widget |
-| `frontend/src/WeeklyCalendarWidget.tsx` | Rolling-Horizon-Kalender: Diese Woche/Nächste Woche/Wochen 3-4 |
-| `frontend/src/ClubSlotsSettings.tsx` | Einfache Liste + Formular für Vereins-Trainingstermine |
-| `frontend/src/api.ts` | Typisierte fetch()-Wrapper für alle Backend-Endpoints |
+| `backend/routers/weekly_plan.py` | Wochenplaner-Endpoints: weekly-plan (Diese/Nächste/Übernächste Woche)/workout-draft/far-weeks-outlook/regenerate (siehe weekly_planner.py) |
+| `backend/routers/performance.py` | Leistung-Seite: readiness-overview/load-status/ctl-trend/thresholds/race-predictions/cycling-prediction/swim-diagnostics/goals (siehe eigener Abschnitt oben) |
+| `frontend/src/App.tsx` | Vier-Seiten-Umschalter (Heute/Woche/Leistung/Einstellungen) über Sidebar+useState, kein Routing |
+| `frontend/src/Sidebar.tsx` | Einklappbare Seitenleiste, Material-Symbols-Navigation (siehe Design-System-Abschnitt) |
+| `frontend/src/TopBar.tsx` | Seitentitel/-untertitel je View, Uhrzeit, Sync-Pille (manueller Trigger), Theme-Toggle |
+| `frontend/src/theme.ts` | `useTheme()`-Hook, Hell/Dunkel/System, localStorage-persistiert |
+| `frontend/src/sidebarCollapsed.ts` | `useSidebarCollapsed()`-Hook, gleiches Persistenz-Muster wie theme.ts |
+| `frontend/src/useCssVar.ts` | Liest eine CSS-Custom-Property als aufgelösten Wert aus (Canvas/Chart.js kann var() nicht selbst auflösen) |
+| `frontend/src/Icon.tsx` | Material-Symbols-Ligature-Icon-Wrapper, ersetzt app-weit Emoji |
+| `frontend/src/TodayView.tsx` | Heute-Ansicht: Trainingsbereitschaft-Karte (ReadinessGauge + Empfehlung inkl. Override-Buttons) + HRV & Ruhepuls-Karte |
+| `frontend/src/ReadinessGauge.tsx` | Chart.js-Doughnut-Gauge für den Readiness-Score (ersetzt frühere Hand-SVG) |
+| `frontend/src/HrvCard.tsx` | "HRV & Ruhepuls"-Karte: Wochenschnitt-Werte + Statuspillen + HrvTrendPanel |
+| `frontend/src/HrvTrendPanel.tsx` | 28-Tage-Bilanz: drei gestapelte Chart.js-Small-Multiples (HRV+Baseline, RHR-Abweichung, Trainings-Load) |
+| `frontend/src/WeekView.tsx` | Eigene "Woche"-Seite, rendert WeeklyCalendarWidget |
+| `frontend/src/WeeklyCalendarWidget.tsx` | Rolling-Horizon-Kalender: Diese Woche/Nächste Woche/Wochen 3-4, inkl. "Woche neu generieren" |
+| `frontend/src/PerformanceView.tsx` | Leistung-Seite: Trainingszustand/Belastungsfokus/CTL-Trend + drei Sportart-Karten (Diagnostik/Ziele/Wettkampf-Prognose) |
+| `frontend/src/ClubSlotsSettings.tsx` | Liste + Formular für Vereins-Trainingstermine (Einstellungen-Seite) |
+| `frontend/src/PerformanceGoalsSettings.tsx` | Liste + Formular für Leistungsziele (Einstellungen-Seite, siehe Leistung-Seiten-Abschnitt oben) |
+| `frontend/src/api.ts` | Typisierte fetch()-Wrapper + geteilte Formatier-Helfer (Pace/Dezimal/Zieldatum) für alle Backend-Endpoints |
 
 ## Datenbank (Auszug nach Kategorie, `db.py`)
 
 - **Tages-Tabellen** (PK `date`, Upsert): `garmin_daily`, `garmin_training_readiness`,
   `garmin_max_metrics`, `garmin_sleep_phases`, `garmin_cycling_ftp`, `garmin_lactate_threshold`,
   `daily_summary` u.v.m. — rund 20 weitere Tier-1/2-Metrik-Tabellen (SpO2, Atmung, Hydration,
-  Blutdruck, Endurance-/Hill-Score, Fitness-Alter, Rennprognosen, ...)
+  Blutdruck, Endurance-/Hill-Score, Fitness-Alter, `garmin_race_predictions` (5k/10k/Halbmarathon/
+  Marathon-Finishzeiten, siehe Leistung-Seiten-Abschnitt oben), `garmin_training_status` (weiterhin
+  synchronisiert, aber auf der Leistung-Seite bewusst NICHT mehr gelesen - siehe Ground-Truth-Fund
+  im Leistung-Seiten-Abschnitt oben), ...)
 - **Zeitreihen-Tabellen** (mehrere Zeilen/Tag, Delete+Insert bei jedem Sync): Stress-, Body-
   Battery-, Herzfrequenz-, Atem-, Schritte-Zeitreihen, geplante Events/Rennen, Friel-Zonen-Snapshots
 - **Aktivitäten:** `garmin_activities` (PK `activity_id`), `garmin_activity_details`
@@ -614,6 +820,10 @@ zeigt `tool_calls_json` je Antwort in einem Debug-Expander). CLI-Alternative: `e
   Begründung im "Rolling-Horizon-Wochenplaner"-Abschnitt oben; `is_key_session INTEGER` als
   nachträglich ergänzte Spalte, `NULL` = Wettkampftag/nicht bewertbar), `weekly_plan_workout_draft`
   (PK `id` AUTOINCREMENT, speichert Builder-Name+Parameter statt eines Workout-Objekts)
+- **Leistungsziele:** `performance_goals` (PK `key` TEXT, siehe Leistung-Seiten-Abschnitt oben -
+  `derived_from_race_goal_id` verweist optional auf `race_goals`, ist aber reine Herkunfts-Info,
+  keine Sperre), `race_goals` (renn-spezifische Zielzeiten - Schreibzugriff bewusst nicht Teil der
+  `performance_goals`-CRUD-API, gehört zu einem separaten, noch offenen Auftrag/KI-Zielgespräch)
 
 ## Wichtige Konventionen
 
@@ -643,11 +853,18 @@ zeigt `tool_calls_json` je Antwort in einem Debug-Expander). CLI-Alternative: `e
 - Frontend-Navigation ist ein einfacher `useState`-Umschalter ohne Routing-Bibliothek (siehe
   FastAPI-Abschnitt oben) - bewusste Entscheidung für aktuell zwei Ansichten, sollte bei weiteren
   Seiten auf `react-router-dom` o.ä. umgestellt werden.
-- Die Heute-Ansicht wurde nicht in einem echten Browser visuell getestet (kein
-  Browser-Automatisierungswerkzeug in dieser Session verfügbar) - nur indirekt über
-  API-Response-Form vs. TypeScript-Interfaces, erfolgreichen Docker-Frontend-Build und
-  Asset-Abruf bestätigt. Manueller Blick ins Frontend unter localhost:8000 steht noch aus. Gilt
-  auch für das neue Kalender-Widget.
+- Kein Browser-Automatisierungswerkzeug in dieser Session verfügbar - Frontend-Änderungen
+  (Heute-, Woche- und Leistung-Ansicht, inkl. Kalender-Widget, Chart.js-Panels, Sportart-Karten)
+  wurden durchgängig nur indirekt verifiziert: API-Response-Form vs. TypeScript-Interfaces,
+  erfolgreicher Docker-Frontend-Build (`tsc -b && vite build`) und erfolgreicher Asset-Abruf. Ein
+  manueller Blick ins echte Frontend unter localhost:8000 steht weiterhin aus.
+- **Schwimmen hat keine Wettkampf-Prognose** (Leistung-Seite) - es gibt keine synchronisierte
+  Datenquelle, aus der sich eine belastbare Schätzung ableiten ließe (weder CSS-Pace noch eine
+  kritische Schwimm-Herzfrequenz) - bewusst nicht erfunden, siehe Leistung-Seiten-Abschnitt oben.
+- **Die Rad-Wettkampf-Schätzung bleibt eine grobe Tendenz**, keine physikalische Modellierung -
+  persönlicher Wirkungsgrad aus einer noch einstelligen Anzahl flacher Fahrten gemittelt, ohne
+  Wind-/Aerodynamik-Korrektur. `sample_size` macht das transparent, wird mit mehr Fahrten
+  automatisch belastbarer (siehe Leistung-Seiten-Abschnitt oben).
 - `POST /api/workout-draft/{id}/upload` (lädt hoch UND plant jetzt auch für den Entwurfstag im
   Garmin-Kalender ein) wurde strukturell (404-Fall, Docker-Build) geprüft, aber noch nicht gegen
   einen echten Garmin-Upload getestet - bewusst zurückgehalten (429-Vorsicht), steht mit dem
