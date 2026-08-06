@@ -10,10 +10,17 @@ from fastapi.staticfiles import StaticFiles
 
 from routers import daily_summary, sync_status, today, club_slots, weekly_plan, performance
 from auto_sync import run_daily_auto_sync_forever
+from db import init_db
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Schema-Migration lief bisher nur implizit über init_db()-Aufrufe der Streamlit-Seiten (siehe
+    # pages/*.py) - dashboard-v2 teilt sich zwar dieselbe SQLite-Datei (docker-compose.yml), aber
+    # falls dashboard-v2 vor dem ersten Streamlit-Seitenaufruf startet (z.B. frischer Host/Volume),
+    # fehlen neu hinzugekommene Tabellen wie weekly_plan. Eigener init_db()-Aufruf macht die API
+    # unabhängig davon.
+    init_db()
     # Automatischer Sync-Trigger (siehe auto_sync.py) - läuft als Hintergrund-Task im selben
     # Event-Loop, solange der Container lebt. Kein manueller Anstoß nötig.
     task = asyncio.create_task(run_daily_auto_sync_forever())
