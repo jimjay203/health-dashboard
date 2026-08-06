@@ -64,6 +64,30 @@ class WeeklyPlanResponse(BaseModel):
     training_phase: str | None = None
     week_rationale_text: str | None = None
     days: list[WeeklyPlanDay]
+    # >0 nur nach POST .../regenerate, wenn dabei Workout-Entwürfe ersetzt wurden, die bereits zu
+    # Garmin hochgeladen waren (siehe regenerate_weekly_plan) - der alte Garmin-Termin bleibt dabei
+    # bestehen, nur der lokale Entwurfs-Status wird zurückgesetzt.
+    already_uploaded_count: int = 0
+
+
+def _build_weekly_plan_response(d, rows, already_uploaded_count=0) -> WeeklyPlanResponse:
+    iso_year, iso_week, iso_weekday = d.isocalendar()
+    week_start = d - timedelta(days=iso_weekday - 1)
+    week_end = week_start + timedelta(days=6)
+
+    for row in rows:
+        row["is_club_slot"] = bool(row["is_club_slot"])
+        row["is_key_session"] = bool(row["is_key_session"]) if row["is_key_session"] is not None else None
+
+    return WeeklyPlanResponse(
+        week_id=f"{iso_year}-W{iso_week:02d}",
+        week_start=week_start.isoformat(),
+        week_end=week_end.isoformat(),
+        training_phase=get_week_phase(d.isoformat()),
+        week_rationale_text=rows[0]["week_rationale_text"] if rows else None,
+        days=[WeeklyPlanDay(**row) for row in rows],
+        already_uploaded_count=already_uploaded_count,
+    )
 
 
 @router.get("/weekly-plan/{date_str}", response_model=WeeklyPlanResponse)
@@ -77,23 +101,36 @@ def get_weekly_plan(date_str: str) -> WeeklyPlanResponse:
             rows = generate_weekly_plan(date_str)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Wochenplan konnte nicht generiert werden: {e}")
+    return _build_weekly_plan_response(d, rows)
 
+
+@router.post("/weekly-plan/{date_str}/regenerate", response_model=WeeklyPlanResponse)
+def regenerate_weekly_plan(date_str: str) -> WeeklyPlanResponse:
+    """Erzwingt eine Neu-Generierung, auch wenn für diese Woche schon ein Plan existiert (z.B.
+    nachdem nachträglich ein Vereins-Termin angelegt wurde) - generate_weekly_plan schreibt über
+    upsert_daily_metric (date als PK), ein vorheriges Löschen von weekly_plan ist deshalb nicht
+    nötig. weekly_plan_workout_draft wird dabei pro Tag ersetzt (siehe _build_workout_drafts) -
+    already_uploaded_count zählt vorher, wie viele der ersetzten Entwürfe schon zu Garmin
+    hochgeladen waren, damit das Frontend transparent warnen kann (der alte Garmin-Termin selbst
+    wird dadurch nicht zurückgenommen)."""
+    d = _validate_date(date_str)
     iso_year, iso_week, iso_weekday = d.isocalendar()
     week_start = d - timedelta(days=iso_weekday - 1)
     week_end = week_start + timedelta(days=6)
 
-    for row in rows:
-        row["is_club_slot"] = bool(row["is_club_slot"])
-        row["is_key_session"] = bool(row["is_key_session"]) if row["is_key_session"] is not None else None
+    conn = get_connection()
+    already_uploaded_count = conn.execute(
+        "SELECT COUNT(*) FROM weekly_plan_workout_draft WHERE date BETWEEN ? AND ? AND uploaded_at IS NOT NULL",
+        (week_start.isoformat(), week_end.isoformat())
+    ).fetchone()[0]
+    conn.close()
 
-    return WeeklyPlanResponse(
-        week_id=f"{iso_year}-W{iso_week:02d}",
-        week_start=week_start.isoformat(),
-        week_end=week_end.isoformat(),
-        training_phase=get_week_phase(date_str),
-        week_rationale_text=rows[0]["week_rationale_text"] if rows else None,
-        days=[WeeklyPlanDay(**row) for row in rows],
-    )
+    try:
+        rows = generate_weekly_plan(date_str)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Wochenplan konnte nicht neu generiert werden: {e}")
+
+    return _build_weekly_plan_response(d, rows, already_uploaded_count=already_uploaded_count)
 
 
 # --- Workout-Entwürfe ---

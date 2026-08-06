@@ -6,6 +6,7 @@ import {
   formatShortDate,
   roundedDurationLabel,
   fetchWeeklyPlan,
+  regenerateWeeklyPlan,
   fetchWorkoutDraft,
   uploadWorkoutDraft,
   fetchFarWeeksOutlook,
@@ -124,7 +125,62 @@ function PlanDay({ day }: { day: WeeklyPlanDay }) {
   );
 }
 
-function PlanWeekTier({ title, plan }: { title: string; plan: WeeklyPlan | null }) {
+// Erzwingt eine Neu-Generierung dieser Woche (z.B. nachdem nachträglich ein Vereins-Termin
+// angelegt wurde - bereits generierte Wochen aktualisieren sich sonst nicht automatisch, siehe
+// backend/routers/weekly_plan.py::regenerate_weekly_plan). already_uploaded_count macht
+// transparent, falls dabei schon zu Garmin hochgeladene Workout-Entwürfe ersetzt wurden (der alte
+// Garmin-Termin selbst bleibt davon unberührt bestehen).
+function RegenerateButton({ dateStr, onRegenerated }: { dateStr: string; onRegenerated: (plan: WeeklyPlan) => void }) {
+  const [loading, setLoading] = useState(false);
+  const [warning, setWarning] = useState<string | null>(null);
+
+  async function handleClick() {
+    setLoading(true);
+    setWarning(null);
+    try {
+      const plan = await regenerateWeeklyPlan(dateStr);
+      onRegenerated(plan);
+      if (plan.already_uploaded_count > 0) {
+        setWarning(
+          `${plan.already_uploaded_count} bereits zu Garmin hochgeladene${plan.already_uploaded_count > 1 ? "" : "r"} ` +
+            `Workout-Entwurf${plan.already_uploaded_count > 1 ? "e" : ""} wurde${plan.already_uploaded_count > 1 ? "n" : ""} ` +
+            "lokal ersetzt - der bestehende Garmin-Termin bleibt unverändert, ggf. dort manuell aufräumen."
+        );
+      }
+    } catch (e: unknown) {
+      setWarning(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        className={`tier-regenerate-button${loading ? " spinning" : ""}`}
+        onClick={handleClick}
+        disabled={loading}
+        title="Woche neu generieren"
+      >
+        <Icon name="refresh" />
+      </button>
+      {warning && <p className="tier-regenerate-warning">{warning}</p>}
+    </>
+  );
+}
+
+function PlanWeekTier({
+  title,
+  plan,
+  dateStr,
+  onRegenerated,
+}: {
+  title: string;
+  plan: WeeklyPlan | null;
+  dateStr: string;
+  onRegenerated: (plan: WeeklyPlan) => void;
+}) {
   return (
     <div className="calendar-tier calendar-tier-current">
       <h3>
@@ -136,6 +192,7 @@ function PlanWeekTier({ title, plan }: { title: string; plan: WeeklyPlan | null 
           </span>
         )}
         {plan?.training_phase && <span className="tier-phase"> · {plan.training_phase}</span>}
+        <RegenerateButton dateStr={dateStr} onRegenerated={onRegenerated} />
       </h3>
       {plan ? (
         <>
@@ -182,10 +239,14 @@ function CompactWeekTier({
   title,
   plan,
   tierVariant,
+  dateStr,
+  onRegenerated,
 }: {
   title: string;
   plan: WeeklyPlan | null;
   tierVariant: "week2" | "week3";
+  dateStr: string;
+  onRegenerated: (plan: WeeklyPlan) => void;
 }) {
   return (
     <div className={`calendar-tier calendar-tier-compact calendar-tier-${tierVariant}`}>
@@ -198,6 +259,7 @@ function CompactWeekTier({
           </span>
         )}
         {plan?.training_phase && <span className="tier-phase"> · {plan.training_phase}</span>}
+        <RegenerateButton dateStr={dateStr} onRegenerated={onRegenerated} />
       </h3>
       {plan ? (
         <div className="compact-plan-days-row">
@@ -268,9 +330,21 @@ function WeeklyCalendarWidget() {
     <div>
       {error && <p className="error-banner">Fehler: {error}</p>}
       <div className="card weekly-calendar-widget">
-        <PlanWeekTier title="Diese Woche" plan={thisWeek} />
-        <CompactWeekTier title="Nächste Woche" plan={nextWeek} tierVariant="week2" />
-        <CompactWeekTier title="Übernächste Woche" plan={weekAfterNext} tierVariant="week3" />
+        <PlanWeekTier title="Diese Woche" plan={thisWeek} dateStr={todayIso()} onRegenerated={setThisWeek} />
+        <CompactWeekTier
+          title="Nächste Woche"
+          plan={nextWeek}
+          tierVariant="week2"
+          dateStr={nextMondayIso()}
+          onRegenerated={setNextWeek}
+        />
+        <CompactWeekTier
+          title="Übernächste Woche"
+          plan={weekAfterNext}
+          tierVariant="week3"
+          dateStr={weekAfterNextMondayIso()}
+          onRegenerated={setWeekAfterNext}
+        />
         <FarWeeksBars weeks={farWeeks} />
       </div>
     </div>

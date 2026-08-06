@@ -524,6 +524,39 @@
   letter-spacing: normal;
 }
 
+.tier-regenerate-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  float: right;
+  font-size: var(--text-md);
+  border: none;
+  background: transparent;
+  color: var(--text);
+  padding: 0;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tier-regenerate-button:hover {
+  color: var(--text-h);
+}
+
+.tier-regenerate-button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.tier-regenerate-button.spinning .icon {
+  animation: sync-spin 0.8s linear infinite;
+}
+
+.tier-regenerate-warning {
+  font-size: var(--text-sm);
+  color: #e5484d;
+  margin-top: 6px;
+}
+
 .plan-day-date,
 .compact-plan-day-date {
   opacity: 0.7;

@@ -83,6 +83,9 @@ export interface WeeklyPlan {
   training_phase: string | null;
   week_rationale_text: string | null;
   days: WeeklyPlanDay[];
+  // >0 nur direkt nach regenerateWeeklyPlan(), wenn dabei bereits zu Garmin hochgeladene
+  // Workout-Entwürfe ersetzt wurden (der alte Garmin-Termin bleibt davon unberührt bestehen).
+  already_uploaded_count: number;
 }
 
 export interface WorkoutDraft {
@@ -441,6 +444,10 @@ export function triggerSync(): Promise<{ success: boolean; error: string | null 
 
 export function fetchWeeklyPlan(date: string): Promise<WeeklyPlan> {
   return fetch(`/api/weekly-plan/${date}`).then((res) => handle<WeeklyPlan>(res));
+}
+
+export function regenerateWeeklyPlan(date: string): Promise<WeeklyPlan> {
+  return fetch(`/api/weekly-plan/${date}/regenerate`, { method: "POST" }).then((res) => handle<WeeklyPlan>(res));
 }
 
 export function fetchWorkoutDraft(date: string): Promise<WorkoutDraft> {
