@@ -907,9 +907,16 @@ def init_db():
         unit TEXT NOT NULL,
         derived_from_race_goal_id INTEGER REFERENCES race_goals(id),
         notes TEXT,
+        target_date TEXT,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
+
+    # target_date (Datum, bis zu dem das Ziel erreicht sein soll) - nachträglich ergänzte Spalte,
+    # ALTER TABLE nötig für bereits bestehende Installationen.
+    existing_columns = {row[1] for row in cursor.execute("PRAGMA table_info(performance_goals)")}
+    if "target_date" not in existing_columns:
+        cursor.execute("ALTER TABLE performance_goals ADD COLUMN target_date TEXT")
 
     conn.commit()
     conn.close()

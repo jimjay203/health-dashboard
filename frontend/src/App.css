@@ -165,6 +165,9 @@
 }
 
 .sync-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: var(--text-xs);
   padding: 6px 10px;
   border-radius: var(--radius-pill);
@@ -196,6 +199,37 @@
 
 .sync-badge-time {
   opacity: 0.8;
+}
+
+.sync-badge-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-headline);
+  border: none;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sync-badge-trigger:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.sync-badge-trigger.spinning .icon {
+  animation: sync-spin 0.8s linear infinite;
+}
+
+@keyframes sync-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .theme-toggle {
@@ -640,15 +674,23 @@
   cursor: pointer;
 }
 
-.club-slot-form {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+.club-slots-table td button + button {
+  margin-left: 8px;
 }
 
-.club-slot-form input,
-.club-slot-form select {
+/* Eingabezeile als <tfoot>-Zeile derselben Tabelle statt eigenem <form> darunter - dadurch
+   übernimmt die native Tabellen-Spaltenbreitenberechnung automatisch die Ausrichtung an den
+   Kopfzeilen-Spalten, statt sie über eine separate Grid-Breitenberechnung nachzubilden. */
+
+.club-slot-form-row td {
+  padding-top: 10px;
+}
+
+.club-slot-form-row input,
+.club-slot-form-row select {
   font: inherit;
+  width: 100%;
+  box-sizing: border-box;
   padding: 6px 10px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
@@ -656,14 +698,21 @@
   color: var(--text-h);
 }
 
-.club-slot-form button {
+.club-slot-form-row input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.club-slot-form-row button {
   font: inherit;
+  width: 100%;
   padding: 6px 14px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--accent-border);
   background: var(--accent-bg);
   color: var(--text-h);
   cursor: pointer;
+  white-space: nowrap;
 }
 
 /* --- Leistung-Seite --- */

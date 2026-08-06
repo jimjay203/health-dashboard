@@ -221,6 +221,7 @@ class PerformanceGoalIn(BaseModel):
     unit: str
     derived_from_race_goal_id: int | None = None
     notes: str | None = None
+    target_date: str | None = None
 
 
 class PerformanceGoalResponse(PerformanceGoalIn):
@@ -239,6 +240,7 @@ def upsert_performance_goal(key: str, body: PerformanceGoalIn) -> PerformanceGoa
     saved = performance_goals.upsert_performance_goal(
         key=body.key, label=body.label, target_value=body.target_value, unit=body.unit,
         derived_from_race_goal_id=body.derived_from_race_goal_id, notes=body.notes,
+        target_date=body.target_date,
     )
     return PerformanceGoalResponse(**saved)
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchSyncStatus, type SyncStatus, type SyncStatusValue } from "./api";
+import { fetchSyncStatus, triggerSync, type SyncStatus, type SyncStatusValue } from "./api";
 import type { View } from "./Sidebar";
 import type { ThemeChoice } from "./theme";
 import Icon from "./Icon";
@@ -45,12 +45,31 @@ function formatSyncTime(iso: string | null): string {
 
 function SyncBadge() {
   const [status, setStatus] = useState<SyncStatus | null>(null);
+  const [triggering, setTriggering] = useState(false);
 
-  useEffect(() => {
+  function reload() {
     fetchSyncStatus()
       .then(setStatus)
       .catch(() => setStatus(null));
-  }, []);
+  }
+
+  useEffect(reload, []);
+
+  // sync-trigger läuft serverseitig blockierend bis der Sync fertig ist (siehe
+  // triggerSync-Kommentar in api.ts) - das Icon dreht sich also für die tatsächliche Dauer dieses
+  // einen Requests, kein separates Polling nötig.
+  async function handleTrigger() {
+    setTriggering(true);
+    try {
+      await triggerSync();
+    } catch {
+      // Fehler landet ohnehin sichtbar im nächsten Status (gave_up/rate_limited) - kein
+      // zusätzlicher Fehlerzustand hier nötig.
+    } finally {
+      setTriggering(false);
+      reload();
+    }
+  }
 
   if (!status) return null;
   const info = SYNC_LABEL[status.status];
@@ -58,6 +77,15 @@ function SyncBadge() {
 
   return (
     <span className={`sync-badge ${info.className}`}>
+      <button
+        type="button"
+        className={`sync-badge-trigger${triggering ? " spinning" : ""}`}
+        onClick={handleTrigger}
+        disabled={triggering}
+        title="Sync jetzt anstoßen"
+      >
+        <Icon name="sync" />
+      </button>
       {info.text}
       {time && <span className="sync-badge-time"> · {time}</span>}
     </span>

@@ -183,6 +183,7 @@ export interface PerformanceGoal {
   unit: string;
   derived_from_race_goal_id: number | null;
   notes: string | null;
+  target_date: string | null;
   updated_at: string;
 }
 
@@ -292,6 +293,14 @@ export function deleteClubSlot(id: number): Promise<{ success: boolean }> {
 
 export function fetchSyncStatus(): Promise<SyncStatus> {
   return fetch(`/api/sync-status`).then((res) => handle<SyncStatus>(res));
+}
+
+// POST /api/sync-trigger läuft serverseitig blockierend bis der Sync fertig ist (siehe
+// backend/routers/sync_status.py) - das fetch-Promise löst sich entsprechend erst danach auf.
+export function triggerSync(): Promise<{ success: boolean; error: string | null }> {
+  return fetch(`/api/sync-trigger`, { method: "POST" }).then((res) =>
+    handle<{ success: boolean; error: string | null }>(res)
+  );
 }
 
 export function fetchWeeklyPlan(date: string): Promise<WeeklyPlan> {
