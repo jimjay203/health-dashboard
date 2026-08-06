@@ -1,19 +1,22 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { Line } from "react-chartjs-2";
+import { Chart as ChartJS, LineElement, PointElement, LinearScale, CategoryScale, Tooltip, Filler, Legend } from "chart.js";
 import {
   todayIso,
   formatShortDate,
   formatPace,
-  formatEnumLabel,
   formatGoalValue,
   unitDisplayLabel,
   goalProgressPct,
   fetchLoadStatus,
+  fetchCtlTrend,
   fetchThresholds,
   fetchPerformanceGoals,
   fetchRacePredictions,
   fetchCyclingPrediction,
   fetchSwimDiagnostics,
   type LoadStatus,
+  type CtlTrendPoint,
   type Thresholds,
   type PerformanceGoal,
   type RacePredictions,
@@ -21,6 +24,9 @@ import {
   type SwimDiagnostics,
 } from "./api";
 import Icon from "./Icon";
+import { useCssVar } from "./useCssVar";
+
+ChartJS.register(LineElement, PointElement, LinearScale, CategoryScale, Tooltip, Filler, Legend);
 
 // Polarisiertes-Training-Richtgröße, dieselbe wie weekly_summary.py::POLARIZATION_MIN_Z1_Z2_PCT -
 // hier gespiegelt statt über einen eigenen Endpoint geholt (gleiches Duplizierungs-Muster wie
@@ -50,93 +56,183 @@ function formatDuration(totalSeconds: number): string {
   return `${minutes}:${String(seconds).padStart(2, "0")} min`;
 }
 
-function RangeBar({
-  value,
-  low,
-  high,
-  formatValue,
-}: {
-  value: number | null;
-  low: number | null;
-  high: number | null;
-  formatValue: (v: number) => string;
-}) {
-  if (value === null || low === null || high === null || low >= high) return null;
-  const padding = (high - low) * 0.3 || 1;
-  const scaleMin = low - padding;
-  const scaleMax = high + padding;
-  const pct = (v: number) => `${Math.max(0, Math.min(100, ((v - scaleMin) / (scaleMax - scaleMin)) * 100))}%`;
-
+// CTL/ATL/TSB als schlichte Werte-Zeile im Strava-Stil ("Fitness & Freshness": große Zahl + farbiger
+// Punkt + Beschriftung, nebeneinander) statt Kacheln - eigene Berechnung statt Garmins
+// unzuverlässiger Trainingszustand-Klassifizierung, siehe Ground-Truth-Fund in
+// backend/routers/performance.py. Rundet bewusst auf ganze Zahlen (wie Strava/TrainingPeaks selbst).
+function TrainingStateRow({ ctl, atl, tsb }: { ctl: number | null; atl: number | null; tsb: number | null }) {
+  if (ctl == null || atl == null || tsb == null) return null;
+  const metrics: { value: number; label: string; dotClass: string }[] = [
+    { value: ctl, label: "Fitness (CTL)", dotClass: "training-state-dot-fitness" },
+    { value: atl, label: "Ermüdung (ATL)", dotClass: "training-state-dot-fatigue" },
+    { value: tsb, label: "Form (TSB)", dotClass: "training-state-dot-form" },
+  ];
   return (
-    <div className="range-bar">
-      <div className="range-bar-track">
-        <div className="range-bar-zone" style={{ left: pct(low), width: `calc(${pct(high)} - ${pct(low)})` }} />
-        <div className="range-bar-marker" style={{ left: pct(value) }} title={formatValue(value)} />
-      </div>
-      <div className="range-bar-labels">
-        <span>{formatValue(low)}</span>
-        <span>{formatValue(high)}</span>
-      </div>
+    <div className="training-state-row">
+      {metrics.map((m) => (
+        <div key={m.label} className="training-state-metric">
+          <span className="training-state-metric-value">{Math.round(m.value)}</span>
+          <span className="training-state-metric-label">
+            <span className={`training-state-dot ${m.dotClass}`} />
+            {m.label}
+          </span>
+        </div>
+      ))}
     </div>
   );
 }
 
-function LoadStatusCard({ loadStatus }: { loadStatus: LoadStatus | null }) {
-  const label = formatEnumLabel(loadStatus?.training_status_label ?? null);
+// Fitness-Verlauf (CTL über Zeit) als Flächen-Linienchart, angelehnt an Strava "Fitness &
+// Freshness" - bewusst nur CTL (nicht ATL/TSB), wie gewünscht ein einzelner Verlauf statt der
+// zusätzlichen Slider/Vergleichscharts, die Strava dort noch zeigt.
+function CtlTrendChart({ trend }: { trend: CtlTrendPoint[] }) {
+  const gridColor = useCssVar("--border");
+  const textColor = useCssVar("--text");
+  if (trend.length < 2) return null;
+
+  return (
+    <div className="ctl-trend-chart-canvas">
+      <Line
+        data={{
+          labels: trend.map((p) => formatShortDate(p.date)),
+          datasets: [
+            {
+              label: "Fitness (CTL)",
+              data: trend.map((p) => p.ctl),
+              borderColor: "#fc4c02",
+              backgroundColor: "rgba(252, 76, 2, 0.12)",
+              borderWidth: 2,
+              pointRadius: 0,
+              fill: true,
+              tension: 0.25,
+              spanGaps: true,
+            },
+            // ATL/TSB per Klick auf die Legende manuell einblendbar (Chart.js-Standardverhalten
+            // bei aktivierter Legende) - "hidden" startet sie ausgeblendet, wie gewünscht.
+            {
+              label: "Ermüdung (ATL)",
+              data: trend.map((p) => p.atl),
+              borderColor: "#868e96",
+              backgroundColor: "rgba(134, 142, 150, 0.12)",
+              borderWidth: 2,
+              pointRadius: 0,
+              fill: true,
+              tension: 0.25,
+              spanGaps: true,
+              hidden: true,
+            },
+            {
+              label: "Form (TSB)",
+              data: trend.map((p) => p.tsb),
+              borderColor: "#0c8599",
+              backgroundColor: "rgba(12, 133, 153, 0.12)",
+              borderWidth: 2,
+              pointRadius: 0,
+              fill: true,
+              tension: 0.25,
+              spanGaps: true,
+              hidden: true,
+            },
+          ],
+        }}
+        options={{
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          scales: {
+            x: {
+              grid: { display: false },
+              ticks: { color: textColor, font: { size: 10 }, maxTicksLimit: 6, autoSkip: true },
+            },
+            y: {
+              grid: { color: gridColor },
+              ticks: { color: textColor, font: { size: 10 }, maxTicksLimit: 4 },
+            },
+          },
+          plugins: {
+            legend: {
+              display: true,
+              position: "bottom",
+              labels: { color: textColor, font: { size: 10 }, boxWidth: 10, padding: 12 },
+            },
+            tooltip: { enabled: true, padding: 6, titleFont: { size: 11 }, bodyFont: { size: 11 } },
+          },
+        }}
+      />
+    </div>
+  );
+}
+
+const TRAINING_STATE_TOOLTIP =
+  "CTL (Fitness): langfristige, chronische Trainingsbelastung (42-Tage-Schnitt).\n" +
+  "ATL (Ermüdung): kurzfristige, akute Belastung (7-Tage-Schnitt).\n" +
+  "TSB (Form): CTL minus ATL - positiv = frisch/erholt, negativ = ermüdet/im Aufbau.\n" +
+  "Eigene Berechnung (PMC-Modell), nicht von Garmin übernommen.";
+
+function LoadStatusCard({ loadStatus, ctlTrend }: { loadStatus: LoadStatus | null; ctlTrend: CtlTrendPoint[] }) {
   return (
     <div className="card performance-card">
       <h3>
         Trainingszustand
+        <InfoTooltip text={TRAINING_STATE_TOOLTIP} />
         {loadStatus?.data_date && loadStatus.data_date !== todayIso() && (
           <span className="tier-kw"> · Stand {formatShortDate(loadStatus.data_date)}</span>
         )}
       </h3>
-      <div className="performance-metric-value">{label ?? "Keine Daten"}</div>
-      {loadStatus?.acute_training_load != null && (
+      {loadStatus?.tsb != null ? (
         <>
-          <p className="week-rationale">
-            Akute Belastung: {loadStatus.acute_training_load.toFixed(0)}
-            {loadStatus.acwr_status && loadStatus.acwr_status !== "NONE" && ` · ACWR: ${formatEnumLabel(loadStatus.acwr_status)}`}
-          </p>
-          <RangeBar
-            value={loadStatus.acute_training_load}
-            low={loadStatus.chronic_load_min}
-            high={loadStatus.chronic_load_max}
-            formatValue={(v) => v.toFixed(0)}
-          />
+          <TrainingStateRow ctl={loadStatus.ctl} atl={loadStatus.atl} tsb={loadStatus.tsb} />
+          <p className="performance-metric-caption">{loadStatus.training_state_label ?? "–"}</p>
+          <CtlTrendChart trend={ctlTrend} />
         </>
+      ) : (
+        <div className="performance-metric-value">Keine Daten</div>
       )}
     </div>
   );
 }
 
+const LOAD_FOCUS_TOOLTIP =
+  "Eigene Berechnung aus den HF-Zonen-Zeiten der letzten 28 Tage (Z1+Z2 = Niedrig-Aerob, Z3 = " +
+  "Hoch-Aerob, Z4+Z5 = Anaerob) - Garmins eigene Verteilung liefert für dieses Konto durchgängig " +
+  "keine Daten, siehe Ground-Truth-Fund in backend/routers/performance.py.";
+
+// Dieselben drei Markenfarben wie im CTL-Chart (siehe TrainingStateRow/CtlTrendChart) - Orange
+// bewusst für Niedrig-Aerob statt Fitness/CTL, da das hier die Zielzone ist (Polarisierungs-Ziel
+// ≥70%), also der prominenteste der drei Werte.
 function LoadFocusBars({ loadStatus }: { loadStatus: LoadStatus | null }) {
-  const bars: { label: string; pct: number | null }[] = [
-    { label: "Anaerob", pct: loadStatus?.load_focus_anaerobic_pct ?? null },
-    { label: "Hoch-Aerob", pct: loadStatus?.load_focus_high_aerobic_pct ?? null },
-    { label: "Niedrig-Aerob", pct: loadStatus?.load_focus_low_aerobic_pct ?? null },
+  const bars: { label: string; pct: number | null; colorClass: string }[] = [
+    { label: "Anaerob", pct: loadStatus?.load_focus_anaerobic_pct ?? null, colorClass: "load-focus-fill-anaerobic" },
+    { label: "Hoch-Aerob", pct: loadStatus?.load_focus_high_aerobic_pct ?? null, colorClass: "load-focus-fill-high-aerobic" },
+    { label: "Niedrig-Aerob", pct: loadStatus?.load_focus_low_aerobic_pct ?? null, colorClass: "load-focus-fill-low-aerobic" },
   ];
   const hasData = bars.some((b) => b.pct !== null);
 
   return (
     <div className="card performance-card">
-      <h3>Belastungsfokus-Verteilung</h3>
+      <h3>
+        Belastungsfokus-Verteilung
+        <InfoTooltip text={LOAD_FOCUS_TOOLTIP} />
+      </h3>
       {hasData ? (
         <>
+          <p className="load-focus-target">
+            <span className="load-focus-target-value">{(loadStatus?.load_focus_low_aerobic_pct ?? 0).toFixed(0)}%</span>
+            <span className="load-focus-target-goal"> Niedrig-Aerob · Ziel: ≥{POLARIZATION_MIN_Z1_Z2_PCT}%</span>
+          </p>
           {bars.map((bar) => (
             <div key={bar.label} className="load-focus-row">
               <span className="load-focus-label">{bar.label}</span>
               <div className="load-focus-track">
-                <div className="load-focus-fill" style={{ width: `${bar.pct ?? 0}%` }} />
+                <div className={`load-focus-fill ${bar.colorClass}`} style={{ width: `${bar.pct ?? 0}%` }} />
               </div>
-              <span className="load-focus-pct">{bar.pct ?? 0}%</span>
+              <span className="load-focus-pct">{(bar.pct ?? 0).toFixed(0)}%</span>
             </div>
           ))}
-          <p className="week-rationale">Ziel (polarisiert): ≥{POLARIZATION_MIN_Z1_Z2_PCT}% Niedrig-Aerob/lockere Belastung.</p>
         </>
       ) : (
         <p className="week-rationale">
-          Noch keine Belastungsfokus-Daten von Garmin verfügbar für dieses Konto.
+          Noch keine Aktivität mit HF-Zonen-Daten in den letzten 28 Tagen.
         </p>
       )}
     </div>
@@ -191,7 +287,10 @@ function GoalProgressBar({ goal, tooltip }: { goal: PerformanceGoal | undefined;
   const unitLabel = unitDisplayLabel(goal.unit);
   const currentLabel = (
     <span className={`goal-progress-current${met ? " goal-met" : ""}`}>
-      Aktuell: {formatGoalValue(goal.current_value, goal.unit)} {unitLabel}
+      <span className="goal-progress-current-caption">Aktuell:</span>{" "}
+      <span className="goal-progress-current-value">
+        {formatGoalValue(goal.current_value, goal.unit)} {unitLabel}
+      </span>
       {met && <Icon name="check" />}
       {tooltip && <InfoTooltip text={tooltip} />}
     </span>
@@ -478,6 +577,7 @@ function SwimPerformanceCard({ swim, goals }: { swim: SwimDiagnostics | null; go
 function PerformanceView() {
   const today = todayIso();
   const [loadStatus, setLoadStatus] = useState<LoadStatus | null>(null);
+  const [ctlTrend, setCtlTrend] = useState<CtlTrendPoint[]>([]);
   const [thresholds, setThresholds] = useState<Thresholds | null>(null);
   const [goals, setGoals] = useState<PerformanceGoal[]>([]);
   const [racePredictions, setRacePredictions] = useState<RacePredictions | null>(null);
@@ -489,6 +589,9 @@ function PerformanceView() {
     fetchLoadStatus(today)
       .then(setLoadStatus)
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+    fetchCtlTrend()
+      .then((res) => setCtlTrend(res.points))
+      .catch(() => setCtlTrend([]));
     fetchThresholds()
       .then(setThresholds)
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
@@ -513,7 +616,7 @@ function PerformanceView() {
       <section>
         <h2 className="performance-section-heading">Wochen-Steuerung &amp; Belastung</h2>
         <div className="performance-row">
-          <LoadStatusCard loadStatus={loadStatus} />
+          <LoadStatusCard loadStatus={loadStatus} ctlTrend={ctlTrend} />
           <LoadFocusBars loadStatus={loadStatus} />
         </div>
       </section>

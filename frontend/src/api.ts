@@ -145,21 +145,33 @@ export interface ReadinessOverview {
 }
 
 export interface LoadStatus {
-  // Datum, dessen Wert tatsächlich angezeigt wird (training_status wird nicht an jedem
-  // Sync-Tag neu geliefert - Backend fällt auf die letzte vorhandene Zeile zurück).
+  // Datum, dessen Wert tatsächlich angezeigt wird (Backend fällt auf die letzte vorhandene
+  // daily_summary-Zeile mit tsb zurück).
   data_date: string | null;
-  training_status_label: string | null;
-  acute_training_load: number | null;
-  chronic_training_load: number | null;
-  chronic_load_min: number | null;
-  chronic_load_max: number | null;
-  acwr_status: string | null;
-  acwr_ratio: number | null;
-  // Alle drei bleiben None, falls Garmin die Verteilung für dieses Konto (noch) nicht liefert -
-  // siehe backend/routers/performance.py-Docstring (Ground-Truth-Fund).
+  // CTL/ATL/TSB (PMC-Modell) statt Garmins eigener, unzuverlässiger Trainingszustand-
+  // Klassifizierung - siehe Ground-Truth-Fund in backend/routers/performance.py.
+  ctl: number | null;
+  atl: number | null;
+  tsb: number | null;
+  training_state_key: string | null;
+  training_state_label: string | null;
+  // Eigene Berechnung aus HF-Zonen-Zeiten (garmin_activities.hr_zone_1..5, 28-Tage-Fenster) -
+  // Garmins eigene Verteilung liefert für dieses Konto durchgängig keine Daten, siehe
+  // backend/routers/performance.py-Docstring (Ground-Truth-Fund).
   load_focus_anaerobic_pct: number | null;
   load_focus_high_aerobic_pct: number | null;
   load_focus_low_aerobic_pct: number | null;
+}
+
+export interface CtlTrendPoint {
+  date: string;
+  ctl: number | null;
+  atl: number | null;
+  tsb: number | null;
+}
+
+export interface CtlTrend {
+  points: CtlTrendPoint[];
 }
 
 export interface Thresholds {
@@ -243,6 +255,10 @@ export function fetchReadinessOverview(date: string): Promise<ReadinessOverview>
 
 export function fetchLoadStatus(date: string): Promise<LoadStatus> {
   return fetch(`/api/performance/load-status/${date}`).then((res) => handle<LoadStatus>(res));
+}
+
+export function fetchCtlTrend(): Promise<CtlTrend> {
+  return fetch(`/api/performance/ctl-trend`).then((res) => handle<CtlTrend>(res));
 }
 
 export function fetchThresholds(): Promise<Thresholds> {

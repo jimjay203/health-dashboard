@@ -775,17 +775,21 @@
   flex: 1 1 360px;
 }
 
-/* Eigener Hintergrund-Kasten pro Unterabschnitt (Diagnostik/Ziel-Tracking/Wettkampf-Prognose) -
-   deutlichere Trennung als eine reine Text-Beschriftung zwischen fließenden Inhalten. */
+/* Trennlinie pro Unterabschnitt (Diagnostik/Ziel-Tracking/Wettkampf-Prognose) - gleiches Prinzip
+   wie die Tier-Trennung im Kalender-Widget (.calendar-tier: border-bottom statt Hintergrund-Kasten). */
 
 .performance-subsection {
-  background: var(--surface-2);
-  border-radius: var(--radius-md);
-  padding: 14px 16px;
-  margin-top: 14px;
+  border-top: 1px solid var(--border);
+  /* Negativer Rand hebt das Karten-Padding (20px, siehe .card) auf, damit die Linie bis zum
+     Kartenrand durchläuft statt am inneren Abstand zu stoppen - der Inhalt bekommt dasselbe
+     Padding direkt wieder zurück, damit er weiterhin bündig mit dem Rest der Karte ist. */
+  margin: 14px -20px 0;
+  padding: 14px 20px 0;
 }
 
 .performance-subsection:first-of-type {
+  border-top: none;
+  padding-top: 0;
   margin-top: 0;
 }
 
@@ -809,8 +813,9 @@
 }
 
 .performance-diagnostic-value {
-  font-size: var(--text-md);
-  font-weight: 600;
+  font-size: var(--text-lg);
+  font-weight: 700;
+  line-height: 1.2;
   color: var(--text-h);
 }
 
@@ -940,80 +945,131 @@
   height: 110px;
 }
 
-/* Range-Bar (HRV-Baseline, akute Belastung vs. Optimalbereich) - eine markierte Zone innerhalb
-   einer Skala + ein Marker für den aktuellen Wert. */
+/* Fitness/Ermüdung/Form-Werte-Zeile (CTL/ATL/TSB, Strava-"Fitness & Freshness"-Stil) - große
+   Zahl + farbiger Punkt + Beschriftung nebeneinander, kein Kachel-/Kasten-Look. Punktfarben sind
+   bewusst fixe Markenfarben (nicht aus den Theme-Tokens), unabhängig von Light/Dark identisch. */
 
-.range-bar {
-  margin-top: 8px;
-}
-
-.range-bar-track {
-  position: relative;
-  height: 8px;
-  border-radius: 4px;
-  background: var(--surface-2);
-}
-
-.range-bar-zone {
-  position: absolute;
-  top: 0;
-  height: 100%;
-  border-radius: 4px;
-  background: var(--accent-bg);
-  border: 1px solid var(--accent-border);
-  box-sizing: border-box;
-}
-
-.range-bar-marker {
-  position: absolute;
-  top: -3px;
-  width: 3px;
-  height: 14px;
-  border-radius: 2px;
-  background: var(--text-h);
-  transform: translateX(-50%);
-}
-
-.range-bar-labels {
+.training-state-row {
   display: flex;
-  justify-content: space-between;
-  font-size: var(--text-2xs);
+  align-items: baseline;
+  gap: 28px;
+  flex-wrap: wrap;
+  margin: 10px 0 4px;
+}
+
+.training-state-metric {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.training-state-metric-value {
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text-h);
+}
+
+.training-state-metric-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
   color: var(--text);
-  margin-top: 4px;
+  white-space: nowrap;
+}
+
+.training-state-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.training-state-dot-fitness {
+  background: #fc4c02;
+}
+
+.training-state-dot-fatigue {
+  background: #868e96;
+}
+
+.training-state-dot-form {
+  background: #0c8599;
+}
+
+.ctl-trend-chart-canvas {
+  position: relative;
+  width: 100%;
+  height: 160px;
+  margin-top: 12px;
 }
 
 /* Belastungsfokus-Verteilung (Anaerob/Hoch-Aerob/Niedrig-Aerob) */
 
+.load-focus-target {
+  margin-bottom: 14px;
+}
+
+.load-focus-target-value {
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text-h);
+}
+
+.load-focus-target-goal {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
 .load-focus-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
+  gap: 10px;
+  margin-bottom: 10px;
 }
 
 .load-focus-label {
   flex: 0 0 90px;
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   color: var(--text);
 }
 
 .load-focus-track {
   flex: 1;
-  height: 8px;
-  border-radius: 4px;
+  height: 14px;
+  border-radius: var(--radius-sm);
   background: var(--surface-2);
   overflow: hidden;
 }
 
 .load-focus-fill {
   height: 100%;
-  background: var(--accent);
+}
+
+.load-focus-fill-anaerobic {
+  background: #868e96;
+}
+
+.load-focus-fill-high-aerobic {
+  background: #0c8599;
+}
+
+.load-focus-fill-low-aerobic {
+  background: #fc4c02;
 }
 
 .load-focus-pct {
   flex: 0 0 40px;
   text-align: right;
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   color: var(--text-h);
 }
 
@@ -1045,13 +1101,24 @@
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  font-weight: 600;
-  font-size: var(--text-md);
   color: var(--text-h);
 }
 
 .goal-progress-current.goal-met {
   color: var(--accent);
+}
+
+.goal-progress-current-caption {
+  font-size: var(--text-sm);
+  font-weight: 400;
+  color: var(--text);
+}
+
+.goal-progress-current-value {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  line-height: 1.2;
+  color: inherit;
 }
 
 .goal-progress-track {

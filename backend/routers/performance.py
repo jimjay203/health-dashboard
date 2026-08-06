@@ -12,11 +12,12 @@ garmin_max_metrics deutlich aktueller synchronisiert wird - garmin_max_metrics i
 die kanonische Quelle, most_recent_vo2max* wird für diese Seite bewusst NICHT verwendet.
 
 Ground-Truth-Fund (Belastungsfokus-Verteilung): metricsTrainingLoadBalanceDTOMap war für dieses
-Konto in JEDEM bisher synchronisierten Tag null - die Verteilung ist deshalb in der Praxis meist
-nicht vorhanden; die Felder bleiben dann konsequent None statt etwas zu erfinden, das Frontend
-zeigt in diesem Fall "keine Daten" statt Balken.
+Konto in JEDEM bisher synchronisierten Tag null - die Verteilung wird deshalb nicht mehr aus
+garmin_training_status gelesen, sondern selbst aus garmin_activities.hr_zone_1..5 berechnet (siehe
+_compute_load_focus), analog zur eigenen CTL/ATL/TSB-Berechnung weiter unten. Bleibt nur dann None,
+wenn im Betrachtungsfenster wirklich keine Aktivität mit HF-Zonen-Daten vorliegt.
 """
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Callable
 
 from fastapi import APIRouter, HTTPException
@@ -116,18 +117,69 @@ def get_readiness_overview(date_str: str) -> ReadinessOverviewResponse:
 
 # --- Block 2: Wochen-Steuerung & Belastung ---
 
+# Ground-Truth-Fund: garmin_training_status (Garmins eigene Trainingszustand-Klassifizierung,
+# akute/chronische Belastung, Belastungsfokus-Verteilung) kommt aus einem einzigen flakey
+# Garmin-Endpoint (get_training_status()) - live bestätigt anhand zweier unabhängiger Syncs
+# desselben Kontos am selben Tag: einer lieferte "NO_STATUS_1", der andere komplett null. Das
+# Konto hat zudem zwei als "primaryTrainingCapable" markierte Geräte (Uhr + Radcomputer), was die
+# Zuordnung auf Garmins Seite vermutlich zusätzlich erschwert. Statt uns auf dieses unzuverlässige
+# Feld zu verlassen, berechnen wir die Fitness/Ermüdung/Form-Einordnung selbst aus CTL/ATL/TSB
+# (daily_summary, PMC-Modell - läuft unconditional für jeden synchronisierten Tag, siehe
+# daily_summary.py) - dieselbe fachliche Grundlage, auf der auch Garmins eigene Klassifizierung
+# beruht, nur ohne die Abhängigkeit von diesem einen wackeligen Endpoint.
+TSB_BANDS = [
+    (-1e9, -30, "high_fatigue", "Hohes Ermüdungsrisiko"),
+    (-30, -10, "productive", "Produktiv"),
+    (-10, 5, "maintaining", "Erhaltend"),
+    (5, 25, "fresh", "Frisch"),
+    (25, 1e9, "detraining_risk", "Formverlust-Risiko"),
+]
+
+
+def _classify_training_state(tsb):
+    if tsb is None:
+        return None, None
+    for low, high, key, label in TSB_BANDS:
+        if low <= tsb < high:
+            return key, label
+    return None, None
+
+
+# Belastungsfokus-Verteilung: Garmins metricsTrainingLoadBalanceDTOMap war für dieses Konto in
+# JEDEM bisher synchronisierten Tag null (separater Ground-Truth-Fund) - eigene Berechnung aus
+# garmin_activities.hr_zone_1..5 (zuverlässig pro Aktivität synchronisiert) statt darauf zu warten.
+# Zonen-Mapping folgt derselben 3-Zonen-Polarisierungs-Logik wie weekly_summary.py/PerformanceView
+# (Z1+Z2 = Niedrig-Aerob, Z3 = Hoch-Aerob, Z4+Z5 = Anaerob). Rollierendes 28-Tage-Fenster, gleiche
+# Fensterlänge wie training_load_28d in daily_summary.py.
+LOAD_FOCUS_WINDOW_DAYS = 28
+
+
+def _compute_load_focus(conn, date_str):
+    start = (datetime.strptime(date_str, "%Y-%m-%d").date() - timedelta(days=LOAD_FOCUS_WINDOW_DAYS)).isoformat()
+    row = conn.execute(
+        "SELECT SUM(hr_zone_1) AS z1, SUM(hr_zone_2) AS z2, SUM(hr_zone_3) AS z3, "
+        "SUM(hr_zone_4) AS z4, SUM(hr_zone_5) AS z5 FROM garmin_activities "
+        "WHERE date(start_time_local) >= ? AND date(start_time_local) <= ?",
+        (start, date_str)
+    ).fetchone()
+    z1, z2, z3, z4, z5 = (row[k] or 0.0 for k in ("z1", "z2", "z3", "z4", "z5"))
+    total = z1 + z2 + z3 + z4 + z5
+    if total <= 0:
+        return None, None, None
+    return (z4 + z5) / total * 100, z3 / total * 100, (z1 + z2) / total * 100
+
+
 class LoadStatusResponse(BaseModel):
-    # data_date: das Datum, dessen Wert tatsächlich angezeigt wird - training_status wird nicht an
-    # jedem Sync-Tag neu geliefert (siehe Moduldocstring), deshalb Fallback auf die letzte
-    # vorhandene Zeile bis einschließlich date_str statt an den meisten Tagen leer zu bleiben.
+    # data_date: das Datum, dessen Wert tatsächlich angezeigt wird (Fallback auf die letzte
+    # vorhandene Zeile bis einschließlich date_str).
     data_date: str | None = None
-    training_status_label: str | None = None
-    acute_training_load: float | None = None
-    chronic_training_load: float | None = None
-    chronic_load_min: float | None = None
-    chronic_load_max: float | None = None
-    acwr_status: str | None = None
-    acwr_ratio: float | None = None
+    ctl: float | None = None
+    atl: float | None = None
+    tsb: float | None = None
+    # Eigene Einordnung (siehe _classify_training_state) - bewusst nicht "training_status_label"
+    # genannt, um sie nicht mit einer (unzuverlässigen) Garmin-eigenen Angabe zu verwechseln.
+    training_state_key: str | None = None
+    training_state_label: str | None = None
     load_focus_anaerobic_pct: float | None = None
     load_focus_high_aerobic_pct: float | None = None
     load_focus_low_aerobic_pct: float | None = None
@@ -137,19 +189,53 @@ class LoadStatusResponse(BaseModel):
 def get_load_status(date_str: str) -> LoadStatusResponse:
     _validate_date(date_str)
     conn = get_connection()
-    row = conn.execute(
-        "SELECT date, training_status_label, acute_training_load, chronic_training_load, "
-        "chronic_load_min, chronic_load_max, acwr_status, acwr_ratio, load_focus_anaerobic_pct, "
-        "load_focus_high_aerobic_pct, load_focus_low_aerobic_pct FROM garmin_training_status "
-        "WHERE date <= ? AND training_status_label IS NOT NULL ORDER BY date DESC LIMIT 1",
+    daily = conn.execute(
+        "SELECT date, ctl, atl, tsb FROM daily_summary WHERE date <= ? AND tsb IS NOT NULL "
+        "ORDER BY date DESC LIMIT 1",
         (date_str,)
     ).fetchone()
+    anaerobic_pct, high_aerobic_pct, low_aerobic_pct = _compute_load_focus(conn, date_str)
     conn.close()
-    if not row:
-        return LoadStatusResponse()
-    data = dict(row)
-    data["data_date"] = data.pop("date")
-    return LoadStatusResponse(**data)
+
+    training_state_key, training_state_label = _classify_training_state(daily["tsb"] if daily else None)
+
+    return LoadStatusResponse(
+        data_date=daily["date"] if daily else None,
+        ctl=daily["ctl"] if daily else None,
+        atl=daily["atl"] if daily else None,
+        tsb=daily["tsb"] if daily else None,
+        training_state_key=training_state_key,
+        training_state_label=training_state_label,
+        load_focus_anaerobic_pct=anaerobic_pct,
+        load_focus_high_aerobic_pct=high_aerobic_pct,
+        load_focus_low_aerobic_pct=low_aerobic_pct,
+    )
+
+
+class CtlTrendPoint(BaseModel):
+    date: str
+    ctl: float | None = None
+    atl: float | None = None
+    tsb: float | None = None
+
+
+class CtlTrendResponse(BaseModel):
+    points: list[CtlTrendPoint] = []
+
+
+CTL_TREND_MAX_DAYS = 180
+
+
+@router.get("/ctl-trend", response_model=CtlTrendResponse)
+def get_ctl_trend() -> CtlTrendResponse:
+    conn = get_connection()
+    cutoff = (date.today() - timedelta(days=CTL_TREND_MAX_DAYS)).isoformat()
+    rows = conn.execute(
+        "SELECT date, ctl, atl, tsb FROM daily_summary WHERE date >= ? AND ctl IS NOT NULL ORDER BY date ASC",
+        (cutoff,)
+    ).fetchall()
+    conn.close()
+    return CtlTrendResponse(points=[CtlTrendPoint(**dict(r)) for r in rows])
 
 
 # --- Block 3: Leistungsdiagnostik & Schwellenwerte (kontostandsweite "aktuelle" Werte, kein
