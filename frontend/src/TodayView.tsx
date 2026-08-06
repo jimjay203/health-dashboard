@@ -73,10 +73,10 @@ function RecommendationDetails({
         </ul>
       )}
       <div className="override-buttons">
-        <button disabled={overriding} onClick={() => onOverride("worse")}>
+        <button className="override-button-worse" disabled={overriding} onClick={() => onOverride("worse")}>
           Fühle mich schlechter
         </button>
-        <button disabled={overriding} onClick={() => onOverride("better")}>
+        <button className="override-button-better" disabled={overriding} onClick={() => onOverride("better")}>
           Fühle mich besser
         </button>
       </div>

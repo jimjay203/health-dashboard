@@ -88,6 +88,7 @@ function TrainingStateRow({ ctl, atl, tsb }: { ctl: number | null; atl: number |
 function CtlTrendChart({ trend }: { trend: CtlTrendPoint[] }) {
   const gridColor = useCssVar("--border");
   const textColor = useCssVar("--text");
+  const accentColor = useCssVar("--accent");
   if (trend.length < 2) return null;
 
   return (
@@ -99,8 +100,8 @@ function CtlTrendChart({ trend }: { trend: CtlTrendPoint[] }) {
             {
               label: "Fitness (CTL)",
               data: trend.map((p) => p.ctl),
-              borderColor: "#fc4c02",
-              backgroundColor: "rgba(252, 76, 2, 0.12)",
+              borderColor: "#f5a623",
+              backgroundColor: "rgba(245, 166, 35, 0.12)",
               borderWidth: 2,
               pointRadius: 0,
               fill: true,
@@ -112,8 +113,8 @@ function CtlTrendChart({ trend }: { trend: CtlTrendPoint[] }) {
             {
               label: "Ermüdung (ATL)",
               data: trend.map((p) => p.atl),
-              borderColor: "#868e96",
-              backgroundColor: "rgba(134, 142, 150, 0.12)",
+              borderColor: "#e5484d",
+              backgroundColor: "rgba(229, 72, 77, 0.12)",
               borderWidth: 2,
               pointRadius: 0,
               fill: true,
@@ -124,8 +125,8 @@ function CtlTrendChart({ trend }: { trend: CtlTrendPoint[] }) {
             {
               label: "Form (TSB)",
               data: trend.map((p) => p.tsb),
-              borderColor: "#0c8599",
-              backgroundColor: "rgba(12, 133, 153, 0.12)",
+              borderColor: accentColor,
+              backgroundColor: `${accentColor}1f`,
               borderWidth: 2,
               pointRadius: 0,
               fill: true,
@@ -197,9 +198,8 @@ const LOAD_FOCUS_TOOLTIP =
   "Hoch-Aerob, Z4+Z5 = Anaerob) - Garmins eigene Verteilung liefert für dieses Konto durchgängig " +
   "keine Daten, siehe Ground-Truth-Fund in backend/routers/performance.py.";
 
-// Dieselben drei Markenfarben wie im CTL-Chart (siehe TrainingStateRow/CtlTrendChart) - Orange
-// bewusst für Niedrig-Aerob statt Fitness/CTL, da das hier die Zielzone ist (Polarisierungs-Ziel
-// ≥70%), also der prominenteste der drei Werte.
+// Dieselbe Ampel-Logik wie überall sonst in der App (grün/orange/rot, siehe --accent/HRV-Bereich) -
+// Niedrig-Aerob grün, da das hier die Zielzone ist (Polarisierungs-Ziel ≥70%).
 function LoadFocusBars({ loadStatus }: { loadStatus: LoadStatus | null }) {
   const bars: { label: string; pct: number | null; colorClass: string }[] = [
     { label: "Anaerob", pct: loadStatus?.load_focus_anaerobic_pct ?? null, colorClass: "load-focus-fill-anaerobic" },

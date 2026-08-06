@@ -5,9 +5,11 @@
   --text: #57575f;
   --text-h: #101114;
   --border: #e4e4e7;
-  --accent: #16a34a;
-  --accent-bg: rgba(22, 163, 74, 0.1);
-  --accent-border: rgba(22, 163, 74, 0.4);
+  /* Dasselbe Grün wie LEVEL_COLORS.HIGH im Trainingsbereitschaft-Gauge (ReadinessGauge.tsx) -
+     bewusst ein einziger Wert für Light/Dark statt unterschiedlicher Töne pro Theme. */
+  --accent: #3dd68c;
+  --accent-bg: rgba(61, 214, 140, 0.1);
+  --accent-border: rgba(61, 214, 140, 0.4);
   --shadow:
     rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
 
@@ -54,9 +56,9 @@
     --text: #a3a7b0;
     --text-h: #f2f3f5;
     --border: #2a2b31;
-    --accent: #34d399;
-    --accent-bg: rgba(52, 211, 153, 0.14);
-    --accent-border: rgba(52, 211, 153, 0.4);
+    --accent: #3dd68c;
+    --accent-bg: rgba(61, 214, 140, 0.14);
+    --accent-border: rgba(61, 214, 140, 0.4);
     --shadow:
       rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
   }
@@ -70,9 +72,9 @@
   --text: #a3a7b0;
   --text-h: #f2f3f5;
   --border: #2a2b31;
-  --accent: #34d399;
-  --accent-bg: rgba(52, 211, 153, 0.14);
-  --accent-border: rgba(52, 211, 153, 0.4);
+  --accent: #3dd68c;
+  --accent-bg: rgba(61, 214, 140, 0.14);
+  --accent-border: rgba(61, 214, 140, 0.4);
   --shadow:
     rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
 }
@@ -84,9 +86,9 @@
   --text: #57575f;
   --text-h: #101114;
   --border: #e4e4e7;
-  --accent: #16a34a;
-  --accent-bg: rgba(22, 163, 74, 0.1);
-  --accent-border: rgba(22, 163, 74, 0.4);
+  --accent: #3dd68c;
+  --accent-bg: rgba(61, 214, 140, 0.1);
+  --accent-border: rgba(61, 214, 140, 0.4);
   --shadow:
     rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
 }

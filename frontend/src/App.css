@@ -327,12 +327,13 @@
 }
 
 .day-score-pill {
+  display: inline-block;
   font-size: var(--text-xs);
   font-weight: 600;
-  padding: 4px 12px;
+  padding: 3px 10px;
   border-radius: var(--radius-pill);
   border: 1px solid;
-  background: transparent;
+  margin-bottom: 10px;
 }
 
 .recommendation-panel {
@@ -385,6 +386,18 @@
   background: var(--surface-2);
   color: var(--text-h);
   cursor: pointer;
+}
+
+.override-buttons button.override-button-worse {
+  border-color: rgba(229, 72, 77, 0.4);
+  background: rgba(229, 72, 77, 0.1);
+  color: #e5484d;
+}
+
+.override-buttons button.override-button-better {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent);
 }
 
 .override-buttons button:disabled {
@@ -1023,15 +1036,15 @@
 }
 
 .training-state-dot-fitness {
-  background: #fc4c02;
+  background: #f5a623;
 }
 
 .training-state-dot-fatigue {
-  background: #868e96;
+  background: #e5484d;
 }
 
 .training-state-dot-form {
-  background: #0c8599;
+  background: var(--accent);
 }
 
 .ctl-trend-chart-canvas {
@@ -1088,15 +1101,15 @@
 }
 
 .load-focus-fill-anaerobic {
-  background: #868e96;
+  background: #e5484d;
 }
 
 .load-focus-fill-high-aerobic {
-  background: #0c8599;
+  background: #f5a623;
 }
 
 .load-focus-fill-low-aerobic {
-  background: #fc4c02;
+  background: var(--accent);
 }
 
 .load-focus-pct {

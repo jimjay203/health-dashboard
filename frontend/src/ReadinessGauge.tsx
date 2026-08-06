@@ -55,7 +55,10 @@ function ReadinessGauge({ score, level }: { score: number | null; level: string 
         </div>
       </div>
       {upperLevel && (
-        <span className="day-score-pill" style={{ color, borderColor: color }}>
+        // Gleiche Optik wie .status-pill (Text-/Randfarbe + halbtransparente Füllung derselben
+        // Farbe) - hier dynamisch pro Level statt fest auf --accent, da Low/Moderate/High
+        // unterschiedliche Farben brauchen.
+        <span className="day-score-pill" style={{ color, borderColor: color, backgroundColor: `${color}1a` }}>
           {LEVEL_LABELS_DE[upperLevel] ?? level}
         </span>
       )}
