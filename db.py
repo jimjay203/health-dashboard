@@ -412,6 +412,15 @@ def init_db():
     if "power_to_weight" not in existing_columns:
         cursor.execute("ALTER TABLE garmin_cycling_ftp ADD COLUMN power_to_weight REAL")
 
+    # Datenkorrektur (kein Schema-Wechsel): garmin_service.py korrigiert Garmins Lactate-Threshold-
+    # "speed" seit einem bestimmten Zeitpunkt um Faktor 10 (Garmin liefert sie zu klein, verifiziert:
+    # Rohwert 0.369 -> absurde Pace ~45 min/km, *10 -> 3.69 m/s -> plausible 4:31 min/km). Zeilen, die
+    # VOR diesem Fix synchronisiert wurden, stehen unkorrigiert in der DB und tauchen seit der
+    # "früheste verfügbare Messung"-Fortschrittsanzeige (siehe backend/routers/performance.py) erstmals
+    # sichtbar auf. speed < 1.0 m/s (="langsamer als 16:40 min/km") ist für einen Schwellentest nicht
+    # plausibel und eindeutig dieser Bug, nicht ein echter Messwert - einmalig automatisch korrigiert.
+    cursor.execute("UPDATE garmin_lactate_threshold SET speed = speed * 10 WHERE speed IS NOT NULL AND speed < 1.0")
+
     # Chronic/Acute Training Load (PMC-Modell, siehe daily_summary.py) - Erweiterung der
     # bestehenden daily_summary-Tabelle um EWMA-basierte Fitness-/Frische-Kennzahlen.
     daily_summary_columns = {"ctl": "REAL", "atl": "REAL", "tsb": "REAL"}
