@@ -46,6 +46,11 @@ function formatSyncTime(iso: string | null): string {
 function SyncBadge() {
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [triggering, setTriggering] = useState(false);
+  // sync-trigger antwortet bei einem fehlgeschlagenen Sync mit HTTP 200 + {success:false, error}
+  // (kein HTTP-Fehler, siehe backend/routers/sync_status.py) - ohne explizite Prüfung von
+  // result.success würde ein Fehlschlag (z.B. Garmin-Rate-Limit) lautlos verschwinden, weder Zeit
+  // noch Daten ändern sich dann, ohne dass sichtbar wird warum.
+  const [triggerError, setTriggerError] = useState<string | null>(null);
 
   function reload() {
     fetchSyncStatus()
@@ -60,11 +65,14 @@ function SyncBadge() {
   // einen Requests, kein separates Polling nötig.
   async function handleTrigger() {
     setTriggering(true);
+    setTriggerError(null);
     try {
-      await triggerSync();
-    } catch {
-      // Fehler landet ohnehin sichtbar im nächsten Status (gave_up/rate_limited) - kein
-      // zusätzlicher Fehlerzustand hier nötig.
+      const result = await triggerSync();
+      if (!result.success) {
+        setTriggerError(result.error ?? "Sync fehlgeschlagen.");
+      }
+    } catch (e: unknown) {
+      setTriggerError(e instanceof Error ? e.message : String(e));
     } finally {
       setTriggering(false);
       reload();
@@ -79,15 +87,16 @@ function SyncBadge() {
     <span className={`sync-badge ${info.className}`}>
       <button
         type="button"
-        className={`sync-badge-trigger${triggering ? " spinning" : ""}`}
+        className={`sync-badge-trigger${triggering ? " spinning" : ""}${triggerError ? " sync-badge-trigger-error" : ""}`}
         onClick={handleTrigger}
         disabled={triggering}
-        title="Sync jetzt anstoßen"
+        title={triggerError ?? "Sync jetzt anstoßen"}
       >
         <Icon name="sync" />
       </button>
       {info.text}
       {time && <span className="sync-badge-time"> · {time}</span>}
+      {triggerError && <span className="sync-badge-error-text"> · {triggerError}</span>}
     </span>
   );
 }
