@@ -10,6 +10,7 @@ import {
 } from "./api";
 import HrvCard from "./HrvCard";
 import ReadinessGauge from "./ReadinessGauge";
+import Icon from "./Icon";
 
 // Garmins feedback_short ist ein SCREAMING_SNAKE_CASE-Kurzcode - anhand echter synchronisierter
 // Werte übersetzt (12 beobachtete Ausprägungen, siehe Ground-Truth-Check), nicht geraten. UNKNOWN
@@ -34,19 +35,23 @@ function translateFeedbackShort(raw: string | null): string | null {
 }
 
 // Kopfzeile (Label + Empfehlungssatz) steht neben dem Gauge; Begründungs-Bullets + Override-
-// Buttons bleiben darunter in voller Breite (siehe ReadinessCard).
+// Buttons bleiben darunter in voller Breite (siehe ReadinessCard). Während overriding blendet der
+// Text auf reduzierte Deckkraft ab (siehe .is-updating in App.css) - sobald die neu berechnete
+// Empfehlung eintrifft, ersetzt sie den Inhalt und blendet wieder auf volle Deckkraft ein.
 function RecommendationHeadline({
   recommendation,
   loading,
+  overriding,
 }: {
   recommendation: Recommendation | null;
   loading: boolean;
+  overriding: boolean;
 }) {
   return (
     <div className="recommendation-panel">
       <div className="recommendation-label">Empfehlung heute</div>
       {recommendation ? (
-        <p className="recommendation-text">{recommendation.recommendation_text}</p>
+        <p className={`recommendation-text${overriding ? " is-updating" : ""}`}>{recommendation.recommendation_text}</p>
       ) : (
         <p>{loading ? "Lade Empfehlung…" : "Keine Empfehlung verfügbar."}</p>
       )}
@@ -66,20 +71,25 @@ function RecommendationDetails({
   return (
     <>
       {recommendation && (
-        <ul className="reasoning-bullets">
+        <ul className={`reasoning-bullets${overriding ? " is-updating" : ""}`}>
           {recommendation.reasoning_bullets.map((bullet, i) => (
             <li key={i}>{bullet}</li>
           ))}
         </ul>
       )}
       <div className="override-buttons">
-        <button className="override-button-worse" disabled={overriding} onClick={() => onOverride("worse")}>
-          Fühle mich schlechter
-        </button>
         <button className="override-button-better" disabled={overriding} onClick={() => onOverride("better")}>
           Fühle mich besser
         </button>
+        <button className="override-button-worse" disabled={overriding} onClick={() => onOverride("worse")}>
+          Fühle mich schlechter
+        </button>
       </div>
+      {overriding && (
+        <p className="override-status">
+          <Icon name="autorenew" className="override-status-icon" /> Empfehlung wird neu berechnet…
+        </p>
+      )}
     </>
   );
 }
@@ -113,7 +123,7 @@ function ReadinessCard({
         <div className="readiness-card-gauge-col">
           <ReadinessGauge score={overview?.score ?? null} level={overview?.level ?? null} />
         </div>
-        <RecommendationHeadline recommendation={recommendation} loading={loading} />
+        <RecommendationHeadline recommendation={recommendation} loading={loading} overriding={overriding} />
       </div>
       <RecommendationDetails recommendation={recommendation} overriding={overriding} onOverride={onOverride} />
     </div>

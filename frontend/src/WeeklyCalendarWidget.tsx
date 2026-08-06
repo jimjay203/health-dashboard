@@ -287,13 +287,12 @@ function FarWeeksBars({ weeks }: { weeks: FarWeekBar[] | null }) {
           <span className="far-week-bar-kw">KW {week.iso_week}</span>
           <span className="far-week-bar-range">
             {formatShortDate(week.week_start)}–{formatShortDate(week.week_end)}
+            {week.training_phase && <span className="far-week-bar-phase"> · {week.training_phase}</span>}
           </span>
-          {week.race_title ? (
+          {week.race_title && (
             <span className="far-week-bar-race-label">
               <Icon name="flag" /> {week.race_title} ({formatShortDate(week.race_date ?? week.week_end)})
             </span>
-          ) : (
-            <span className="far-week-bar-phase">{week.training_phase ?? "–"}</span>
           )}
         </div>
       ))}

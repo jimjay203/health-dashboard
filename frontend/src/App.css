@@ -354,6 +354,7 @@
   line-height: 1.45;
   color: var(--text-h);
   margin-bottom: 12px;
+  transition: opacity 1.2s ease;
 }
 
 .reasoning-bullets {
@@ -363,6 +364,7 @@
   color: var(--text);
   font-size: var(--text-md);
   line-height: 1.6;
+  transition: opacity 1.2s ease;
 }
 
 .reasoning-bullets li {
@@ -371,6 +373,14 @@
 
 .reasoning-bullets li:last-child {
   margin-bottom: 0;
+}
+
+/* Während der Override-Neuberechnung (siehe TodayView.tsx::handleOverride) blenden Empfehlungssatz
+   + Begründungs-Bullets auf reduzierte Deckkraft ab, statt kommentarlos stehen zu bleiben - sobald
+   die neue Empfehlung eintrifft, ersetzt sie den Inhalt und blendet wieder auf volle Deckkraft ein. */
+.recommendation-text.is-updating,
+.reasoning-bullets.is-updating {
+  opacity: 0.35;
 }
 
 .override-buttons {
@@ -403,6 +413,19 @@
 .override-buttons button:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.override-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-sm);
+  color: var(--text);
+  margin-top: 8px;
+}
+
+.override-status-icon {
+  animation: sync-spin 0.8s linear infinite;
 }
 
 /* --- Rolling-Horizon-Kalender-Widget --- */
@@ -677,11 +700,13 @@
 }
 
 .far-week-bar-range {
-  flex: 1;
+  flex: 0 0 auto;
 }
 
+/* Phase steht direkt hinter dem Datum (wie tier-phase bei Nächste/Übernächste Woche), statt über
+   flex:1 auf der Range an den rechten Rand der Zeile gedrückt zu werden. */
 .far-week-bar-phase {
-  flex: 0 0 auto;
+  color: var(--text);
 }
 
 /* Die Woche des Rennens selbst - Wettkampf und Datum explizit benannt statt nur der Phase. */
