@@ -13,9 +13,11 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from db import get_connection
+from db import get_connection, save_journal_entry
 from daily_recommendation import generate_daily_recommendation, get_cached_recommendation, \
     set_override_and_regenerate
+from daily_summary import sync_journal_columns
+import insight_memory
 
 router = APIRouter(prefix="/api", tags=["today"])
 
@@ -61,6 +63,68 @@ def post_daily_override(date_str: str, body: OverrideRequest) -> RecommendationR
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Override konnte nicht verarbeitet werden: {e}")
     return RecommendationResponse(**fresh)
+
+
+# --- Tagesjournal (subjektives Befinden: RPE/Muskelkater/Energie + Freitext) ---
+
+class JournalResponse(BaseModel):
+    date: str
+    rpe_score: int | None = None
+    muscle_soreness: int | None = None
+    energy_level: int | None = None
+    notes: str | None = None
+
+
+@router.get("/daily-journal/{date_str}", response_model=JournalResponse)
+def get_daily_journal(date_str: str) -> JournalResponse:
+    _validate_date(date_str)
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT date, rpe_score, muscle_soreness, energy_level, notes FROM daily_journal WHERE date = ?",
+        (date_str,)
+    ).fetchone()
+    conn.close()
+    return JournalResponse(**dict(row)) if row else JournalResponse(date=date_str)
+
+
+class JournalIn(BaseModel):
+    rpe_score: int
+    muscle_soreness: int
+    energy_level: int
+    notes: str | None = None
+
+
+class SaveJournalResponse(BaseModel):
+    journal: JournalResponse
+    # Freitext fließt automatisch als insight_memory_raw-Eintrag (source="journal") ins
+    # Erkenntnis-Gedächtnis ein (siehe insight_memory.py) - ein Gemini-Fehler dabei darf das
+    # bereits erfolgreich gespeicherte Journal nicht als Fehlschlag erscheinen lassen (gleiches
+    # Best-Effort-Prinzip wie bisher in pages/1_🏠_Home.py), wird dem Frontend aber transparent
+    # als Warnung statt stillschweigend verschluckt zurückgegeben.
+    insight_memory_warning: str | None = None
+
+
+@router.put("/daily-journal/{date_str}", response_model=SaveJournalResponse)
+def put_daily_journal(date_str: str, body: JournalIn) -> SaveJournalResponse:
+    _validate_date(date_str)
+    save_journal_entry(date_str, body.rpe_score, body.muscle_soreness, body.energy_level, body.notes)
+    sync_journal_columns(date_str, body.rpe_score, body.muscle_soreness, body.energy_level)
+
+    warning = None
+    notes = (body.notes or "").strip()
+    if notes:
+        try:
+            insight_memory.add_raw_entry(notes, source="journal")
+        except Exception as e:
+            warning = f"Journal gespeichert, aber Verdichtung ins Erkenntnis-Gedächtnis fehlgeschlagen: {e}"
+
+    return SaveJournalResponse(
+        journal=JournalResponse(
+            date=date_str, rpe_score=body.rpe_score, muscle_soreness=body.muscle_soreness,
+            energy_level=body.energy_level, notes=body.notes,
+        ),
+        insight_memory_warning=warning,
+    )
 
 
 # --- Wochenstreifen ---

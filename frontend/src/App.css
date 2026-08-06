@@ -478,6 +478,158 @@
   animation: sync-spin 0.8s linear infinite;
 }
 
+/* --- Subjektives Tagesjournal & Befinden (JournalCard.tsx) --- */
+
+.journal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.journal-header h3 {
+  margin: 0;
+}
+
+.journal-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-2xs);
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.journal-status-filled {
+  color: var(--accent);
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+}
+
+.journal-status-open {
+  color: #f5a623;
+  border-color: rgba(245, 166, 35, 0.4);
+  background: rgba(245, 166, 35, 0.1);
+}
+
+.journal-warning {
+  color: #f5a623;
+  font-size: var(--text-sm);
+  margin-bottom: 12px;
+}
+
+.journal-summary-row {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.journal-summary-metric-value {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.journal-summary-metric-label {
+  font-size: var(--text-2xs);
+  color: var(--text);
+}
+
+.journal-notes {
+  font-size: var(--text-sm);
+  color: var(--text);
+  margin: 0 0 12px;
+}
+
+.journal-edit-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: inherit;
+  font-size: var(--text-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-h);
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.journal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.journal-slider-row {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.journal-slider-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 180px;
+}
+
+.journal-slider-label {
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.journal-slider-value {
+  color: var(--text-h);
+  font-weight: 600;
+}
+
+.journal-slider-field input[type="range"] {
+  accent-color: var(--accent);
+}
+
+.journal-textarea {
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text-h);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  min-height: 70px;
+  resize: vertical;
+}
+
+.journal-form-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.journal-form-actions button {
+  font: inherit;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.journal-form-actions button[type="submit"] {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.journal-form-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* --- Rolling-Horizon-Kalender-Widget --- */
 /* Eine durchgehende Karte für alle vier Ebenen (statt vier einzelner Karten) - Ebenen sind
    Abschnitte innerhalb derselben Fläche, per Trennlinie statt Abstand/eigenem Rahmen abgesetzt,

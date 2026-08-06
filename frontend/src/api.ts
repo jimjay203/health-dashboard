@@ -449,6 +449,43 @@ export function postOverride(date: string, overrideValue: OverrideValue): Promis
   }).then((res) => handle<Recommendation>(res));
 }
 
+// --- Tagesjournal (RPE/Muskelkater/Energie + Freitext, siehe backend/routers/today.py) ---
+
+export interface DailyJournal {
+  date: string;
+  rpe_score: number | null;
+  muscle_soreness: number | null;
+  energy_level: number | null;
+  notes: string | null;
+}
+
+export interface DailyJournalInput {
+  rpe_score: number;
+  muscle_soreness: number;
+  energy_level: number;
+  notes: string | null;
+}
+
+export interface SaveJournalResult {
+  journal: DailyJournal;
+  // Freitext fließt automatisch ins Erkenntnis-Gedächtnis (source="journal", siehe
+  // InsightMemoryView.tsx) - ein Gemini-Fehler dabei lässt das Journal-Speichern selbst nicht
+  // fehlschlagen, wird aber transparent als Warnung statt stillschweigend verschluckt angezeigt.
+  insight_memory_warning: string | null;
+}
+
+export function fetchDailyJournal(date: string): Promise<DailyJournal> {
+  return fetch(`/api/daily-journal/${date}`).then((res) => handle<DailyJournal>(res));
+}
+
+export function saveDailyJournal(date: string, entry: DailyJournalInput): Promise<SaveJournalResult> {
+  return fetch(`/api/daily-journal/${date}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(entry),
+  }).then((res) => handle<SaveJournalResult>(res));
+}
+
 export function fetchWeekStrip(date: string): Promise<WeekStrip> {
   return fetch(`/api/week-strip/${date}`).then((res) => handle<WeekStrip>(res));
 }

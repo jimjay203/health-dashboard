@@ -9,6 +9,7 @@ import {
   type OverrideValue,
 } from "./api";
 import HrvCard from "./HrvCard";
+import JournalCard from "./JournalCard";
 import ReadinessGauge from "./ReadinessGauge";
 import Icon from "./Icon";
 
@@ -163,6 +164,7 @@ function TodayView() {
   return (
     <div className="today-view">
       {error && <p className="error-banner">Fehler: {error}</p>}
+      <JournalCard date={today} />
       <div className="performance-row">
         <ReadinessCard
           overview={overview}
