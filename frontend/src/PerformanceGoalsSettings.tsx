@@ -3,23 +3,29 @@ import {
   fetchPerformanceGoals,
   savePerformanceGoal,
   deletePerformanceGoal,
+  isPaceUnit,
+  paceUnitLabel,
+  unitDisplayLabel,
+  parsePaceToSeconds,
+  formatSecondsToPace,
+  parseGermanDecimal,
+  formatGermanDecimal,
+  formatGoalValue,
   type PerformanceGoal,
   type PerformanceGoalInput,
 } from "./api";
 
 // Feste Liste statt Freitext (siehe PerformanceView.tsx) - der Key ist der Join-Schlüssel zu den
 // Schwellenwert-Karten auf der Leistungsseite, ein Tippfehler dort machte das Ziel bisher
-// unbemerkt wirkungslos. Nur ftp_w_per_kg/run_threshold_pace/marathon_pace werden aktuell
-// tatsächlich als "Ziel erreicht"-Vergleich angezeigt (siehe GoalComparison-Aufrufe dort) -
-// halbmarathon_pace/10km_pace/5km_pace/swim_pace_100m haben noch keine eigene Schwellenwert-Karte,
-// werden hier aber schon als generische Benchmarks (siehe Beschreibungstext unten) unterstützt.
+// unbemerkt wirkungslos. Nur ftp_w_per_kg/run_threshold_pace/marathon_pace/halbmarathon_pace haben
+// eine echte Garmin-Ist-Wert-Quelle für die Fortschrittsanzeige dort (siehe GOAL_METRIC_SOURCES in
+// backend/routers/performance.py) - swim_pace_100m wird hier trotzdem schon als generischer
+// Benchmark unterstützt, bekommt auf der Leistungsseite aber vorerst keine Fortschrittsanzeige.
 const KNOWN_GOAL_KEYS: { key: string; label: string; unit: string }[] = [
   { key: "ftp_w_per_kg", label: "FTP-Ziel (W/kg)", unit: "W/kg" },
   { key: "run_threshold_pace", label: "Lauf-Schwellenpace", unit: "sec/km" },
   { key: "marathon_pace", label: "Marathon-Zielpace", unit: "sec/km" },
   { key: "halbmarathon_pace", label: "Halbmarathon-Zielpace", unit: "sec/km" },
-  { key: "10km_pace", label: "10-km-Zielpace", unit: "sec/km" },
-  { key: "5km_pace", label: "5-km-Zielpace", unit: "sec/km" },
   // 100m ist die triathlon-/schwimmsport-übliche Bezugsstrecke für Zielpace (analog zu sec/km
   // beim Laufen) - andere Einheiten (z.B. sec/50m) wären unüblich für Freiwasser-/Bahn-Vergleiche.
   { key: "swim_pace_100m", label: "Schwimm-Zielpace (100m)", unit: "sec/100m" },
@@ -29,54 +35,15 @@ function emptyForm(): PerformanceGoalInput {
   const first = KNOWN_GOAL_KEYS[0];
   return {
     key: first.key, label: first.label, target_value: 0, unit: first.unit,
-    derived_from_race_goal_id: null, notes: null, target_date: null,
+    derived_from_race_goal_id: null, notes: null, target_date: null, start_date: null,
   };
-}
-
-// sec/km und sec/100m sind intern in Sekunden gespeichert (siehe target_value), aber als
-// "mm:ss min/km"-Trainingspace deutlich angenehmer einzugeben als eine rohe Sekundenzahl.
-function isPaceUnit(unit: string): boolean {
-  return unit === "sec/km" || unit === "sec/100m";
-}
-
-function paceUnitLabel(unit: string): string {
-  return unit === "sec/100m" ? "min/100m" : "min/km";
-}
-
-function parsePaceToSeconds(text: string): number | null {
-  const match = text.trim().match(/^(\d{1,3}):([0-5]\d)$/);
-  if (!match) return null;
-  return Number(match[1]) * 60 + Number(match[2]);
-}
-
-function formatSecondsToPace(totalSeconds: number): string {
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = Math.round(totalSeconds % 60);
-  return `${minutes}:${String(seconds).padStart(2, "0")}`;
-}
-
-// W/kg wird wie im Rest der App als deutsche Dezimalzahl mit Komma eingegeben, intern aber als
-// normale Zahl (Punkt) gespeichert/übertragen.
-function parseGermanDecimal(text: string): number | null {
-  const normalized = text.trim().replace(",", ".");
-  if (normalized === "") return null;
-  const value = Number(normalized);
-  return Number.isFinite(value) ? value : null;
-}
-
-function formatGermanDecimal(value: number): string {
-  return String(value).replace(".", ",");
 }
 
 // Auch die Tabellen-Anzeige zeigt Pace-Ziele als mm:ss min/km statt der intern gespeicherten
 // rohen Sekundenzahl - sec/km bleibt reines Speicherformat, taucht an der Oberfläche nirgends auf
 // (auch nicht im Einheit-Feld des Formulars selbst, siehe unitDisplayLabel-Verwendung unten).
 function displayValue(goal: PerformanceGoal): string {
-  return isPaceUnit(goal.unit) ? formatSecondsToPace(goal.target_value) : String(goal.target_value);
-}
-
-function unitDisplayLabel(unit: string): string {
-  return isPaceUnit(unit) ? paceUnitLabel(unit) : unit;
+  return formatGoalValue(goal.target_value, goal.unit);
 }
 
 // Eigenes Text-Zwischenspeicher-State statt eines direkt an target_value gebundenen <input
@@ -166,6 +133,7 @@ function PerformanceGoalsSettings() {
       <p className="week-rationale">
         Generische Leistungs-Benchmarks für die Vergleiche auf der Leistungsseite (z. B.
         Marathon-Zielpace, FTP-Ziel in W/kg) - unabhängig von einer konkreten Wettkampfanmeldung.
+        Startdatum bestimmt den Ausgangswert für die Fortschrittsanzeige auf der Leistungsseite.
       </p>
       {error && <p className="error-banner">Fehler: {error}</p>}
 
@@ -177,6 +145,7 @@ function PerformanceGoalsSettings() {
               <th>Label</th>
               <th>Zielwert</th>
               <th>Einheit</th>
+              <th>Startdatum</th>
               <th>Zieldatum</th>
               <th>Notiz</th>
               <th></th>
@@ -189,6 +158,7 @@ function PerformanceGoalsSettings() {
                 <td>{goal.label}</td>
                 <td>{displayValue(goal)}</td>
                 <td>{unitDisplayLabel(goal.unit)}</td>
+                <td>{goal.start_date ?? "–"}</td>
                 <td>{goal.target_date ?? "–"}</td>
                 <td>{goal.notes ?? "–"}</td>
                 <td>
@@ -203,7 +173,7 @@ function PerformanceGoalsSettings() {
             ))}
             {goals.length === 0 && (
               <tr>
-                <td colSpan={7}>Noch keine Leistungsziele angelegt.</td>
+                <td colSpan={8}>Noch keine Leistungsziele angelegt.</td>
               </tr>
             )}
           </tbody>
@@ -246,6 +216,13 @@ function PerformanceGoalsSettings() {
                     (siehe KNOWN_GOAL_KEYS), und intern gespeicherte Einheiten wie sec/km sollen
                     an der Oberfläche nie sichtbar sein (siehe unitDisplayLabel). */}
                 <input value={unitDisplayLabel(form.unit)} disabled />
+              </td>
+              <td>
+                <input
+                  type="date"
+                  value={form.start_date ?? ""}
+                  onChange={(e) => setForm({ ...form, start_date: e.target.value || null })}
+                />
               </td>
               <td>
                 <input

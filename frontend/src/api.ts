@@ -176,6 +176,40 @@ export interface Thresholds {
   vo2max_cycling_date: string | null;
 }
 
+// Echter Garmin Race-Predictor (garmin_race_predictions, täglich synchronisiert) - Finish-Zeiten
+// in Sekunden für die vier Standard-Laufdistanzen.
+export interface RacePredictions {
+  date: string | null;
+  time_5k: number | null;
+  time_10k: number | null;
+  time_half_marathon: number | null;
+  time_marathon: number | null;
+}
+
+// Kein Garmin-Pendant fürs Rad - Schätzung aus dem eigenen Wirkungsgrad (km/h pro Watt), siehe
+// backend/routers/performance.py::get_cycling_prediction. sample_size zeigt die Datenbasis, damit
+// die Schätzung transparent als "wird mit mehr Fahrten belastbarer" statt als Fakt erscheint.
+export interface CyclingPredictionScenario {
+  key: string;
+  label: string;
+  distance_km: number;
+  target_power_watts: number | null;
+  estimated_speed_kmh: number | null;
+  estimated_duration_seconds: number | null;
+}
+
+export interface CyclingPrediction {
+  sample_size: number;
+  efficiency_kmh_per_watt: number | null;
+  scenarios: CyclingPredictionScenario[];
+}
+
+export interface SwimDiagnostics {
+  date: string | null;
+  swolf: number | null;
+  pace_sec_per_100m: number | null;
+}
+
 export interface PerformanceGoal {
   key: string;
   label: string;
@@ -184,10 +218,24 @@ export interface PerformanceGoal {
   derived_from_race_goal_id: number | null;
   notes: string | null;
   target_date: string | null;
+  start_date: string | null;
   updated_at: string;
+  // Serverseitig abgeleitet aus echten Garmin-Zeitreihen (siehe backend/routers/performance.py::
+  // _metric_value) - null nur, falls für diesen Ziel-Typ noch kein Ist-Wert vorliegt.
+  current_value: number | null;
+  current_value_date: string | null;
+  start_value: number | null;
+  // Datum des tatsächlich verwendeten Startwerts - entspricht start_date, wenn gesetzt, sonst der
+  // frühesten verfügbaren Messung (impliziter Start, siehe _enrich_goal im Backend). Für die
+  // Fortschrittsbalken-Anzeige verwenden, NICHT start_date selbst (das bleibt das reine
+  // Formular-Feld).
+  start_value_date: string | null;
 }
 
-export type PerformanceGoalInput = Omit<PerformanceGoal, "updated_at">;
+export type PerformanceGoalInput = Omit<
+  PerformanceGoal,
+  "updated_at" | "current_value" | "current_value_date" | "start_value" | "start_value_date"
+>;
 
 export function fetchReadinessOverview(date: string): Promise<ReadinessOverview> {
   return fetch(`/api/performance/readiness-overview/${date}`).then((res) => handle<ReadinessOverview>(res));
@@ -199,6 +247,18 @@ export function fetchLoadStatus(date: string): Promise<LoadStatus> {
 
 export function fetchThresholds(): Promise<Thresholds> {
   return fetch(`/api/performance/thresholds`).then((res) => handle<Thresholds>(res));
+}
+
+export function fetchRacePredictions(): Promise<RacePredictions> {
+  return fetch(`/api/performance/race-predictions`).then((res) => handle<RacePredictions>(res));
+}
+
+export function fetchCyclingPrediction(): Promise<CyclingPrediction> {
+  return fetch(`/api/performance/cycling-prediction`).then((res) => handle<CyclingPrediction>(res));
+}
+
+export function fetchSwimDiagnostics(): Promise<SwimDiagnostics> {
+  return fetch(`/api/performance/swim-diagnostics`).then((res) => handle<SwimDiagnostics>(res));
 }
 
 export function fetchPerformanceGoals(): Promise<PerformanceGoal[]> {
@@ -225,6 +285,66 @@ export function formatPace(secPerKm: number | null): string {
   const minutes = Math.floor(secPerKm / 60);
   const seconds = Math.round(secPerKm % 60);
   return `${minutes}:${String(seconds).padStart(2, "0")} min/km`;
+}
+
+// Geteilte Pace-/Dezimal-Formatierung für Leistungsziele (PerformanceGoalsSettings + Performance-
+// View) - sec/km und sec/100m sind intern in Sekunden gespeichert, an der Oberfläche aber
+// ausschließlich als "mm:ss min/km"/"mm:ss min/100m" ein-/ausgegeben; W/kg mit deutschem Komma.
+export function isPaceUnit(unit: string): boolean {
+  return unit === "sec/km" || unit === "sec/100m";
+}
+
+export function paceUnitLabel(unit: string): string {
+  return unit === "sec/100m" ? "min/100m" : "min/km";
+}
+
+export function unitDisplayLabel(unit: string): string {
+  return isPaceUnit(unit) ? paceUnitLabel(unit) : unit;
+}
+
+export function parsePaceToSeconds(text: string): number | null {
+  const match = text.trim().match(/^(\d{1,3}):([0-5]\d)$/);
+  if (!match) return null;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+export function formatSecondsToPace(totalSeconds: number): string {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = Math.round(totalSeconds % 60);
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+export function parseGermanDecimal(text: string): number | null {
+  const normalized = text.trim().replace(",", ".");
+  if (normalized === "") return null;
+  const value = Number(normalized);
+  return Number.isFinite(value) ? value : null;
+}
+
+export function formatGermanDecimal(value: number): string {
+  return String(value).replace(".", ",");
+}
+
+// Zeigt einen Wert in derselben oberflächen-gerechten Einheit wie unitDisplayLabel (Pace ->
+// mm:ss, W/kg -> Komma) - für current_value/start_value/target_value gleichermaßen verwendet.
+// current_value/start_value kommen aus echten Garmin-Werten mit vielen Nachkommastellen (siehe
+// GOAL_METRIC_SOURCES in backend/routers/performance.py) - W/kg wird deshalb hier (nicht in
+// formatGermanDecimal selbst, das bleibt für die editierbare Zielwert-Eingabe exakt) auf eine
+// Nachkommastelle gerundet, konsistent mit der Kopfzeilen-Anzeige in BikeThresholdCard.
+export function formatGoalValue(value: number, unit: string): string {
+  if (isPaceUnit(unit)) return formatSecondsToPace(value);
+  if (unit === "W/kg") return formatGermanDecimal(Math.round(value * 10) / 10);
+  return String(value);
+}
+
+// sec/km und sec/100m sind "niedriger ist besser" (schnellere Pace), alles andere (W/kg, ...)
+// "höher ist besser" - dieselbe Konvention wie die bestehende goalIsMet-Logik in PerformanceView.
+export function goalProgressPct(startValue: number, currentValue: number, targetValue: number, unit: string): number {
+  const lowerIsBetter = unit.includes("sec");
+  const span = lowerIsBetter ? startValue - targetValue : targetValue - startValue;
+  if (span === 0) return currentValue === targetValue ? 100 : 0;
+  const progressed = lowerIsBetter ? startValue - currentValue : currentValue - startValue;
+  return Math.max(0, Math.min(100, (progressed / span) * 100));
 }
 
 // Garmins hrvSummary.status/trainingStatusFeedbackPhrase sind SCREAMING_SNAKE_CASE-Enums - reine

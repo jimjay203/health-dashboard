@@ -19,7 +19,7 @@ def list_performance_goals():
     return [dict(r) for r in rows]
 
 
-def upsert_performance_goal(key, label, target_value, unit, derived_from_race_goal_id=None, notes=None, target_date=None):
+def upsert_performance_goal(key, label, target_value, unit, derived_from_race_goal_id=None, notes=None, target_date=None, start_date=None):
     row_data = {
         "key": key,
         "label": label,
@@ -28,6 +28,7 @@ def upsert_performance_goal(key, label, target_value, unit, derived_from_race_go
         "derived_from_race_goal_id": derived_from_race_goal_id,
         "notes": notes,
         "target_date": target_date,
+        "start_date": start_date,
         "updated_at": datetime.now().isoformat(),
     }
     upsert_by_key("performance_goals", "key", row_data)

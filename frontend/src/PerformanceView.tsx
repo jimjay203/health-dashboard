@@ -1,15 +1,24 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   todayIso,
   formatShortDate,
   formatPace,
   formatEnumLabel,
+  formatGoalValue,
+  unitDisplayLabel,
+  goalProgressPct,
   fetchLoadStatus,
   fetchThresholds,
   fetchPerformanceGoals,
+  fetchRacePredictions,
+  fetchCyclingPrediction,
+  fetchSwimDiagnostics,
   type LoadStatus,
   type Thresholds,
   type PerformanceGoal,
+  type RacePredictions,
+  type CyclingPrediction,
+  type SwimDiagnostics,
 } from "./api";
 import Icon from "./Icon";
 
@@ -27,6 +36,18 @@ function InfoTooltip({ text }: { text: string }) {
       <Icon name="info" />
     </span>
   );
+}
+
+// Sekunden -> "1:35:00 h" (>=1h) bzw. "20:15 min" - für Renn-/Prognose-Zeiten, deren
+// Größenordnung je nach Distanz stark variiert (5km vs. Marathon).
+function formatDuration(totalSeconds: number): string {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = Math.round(totalSeconds % 60);
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")} h`;
+  }
+  return `${minutes}:${String(seconds).padStart(2, "0")} min`;
 }
 
 function RangeBar({
@@ -122,50 +143,251 @@ function LoadFocusBars({ loadStatus }: { loadStatus: LoadStatus | null }) {
   );
 }
 
+// Eigener Kasten (Hintergrund-Ton statt nur einer Beschriftung) pro Unterabschnitt einer
+// Sportart-Karte - Diagnostik/Ziel-Tracking/Wettkampf-Prognose sollen sich klar voneinander
+// abheben, nicht nur durch eine kleine Caption getrennt sein.
+function Subsection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="performance-subsection">
+      <p className="performance-subsection-label">{title}</p>
+      {children}
+    </div>
+  );
+}
+
+// Kleiner Diagnostik-Wert innerhalb der Sportart-Karte (kein eigenes .card - Diagnostik-Werte
+// haben keine Zielverfolgung, sind reine Ist-Werte, siehe DiagnosticsRow).
+function DiagnosticItem({ label, value, date }: { label: string; value: string; date?: string | null }) {
+  return (
+    <div className="performance-diagnostic-item">
+      <div className="performance-diagnostic-value">{value}</div>
+      <div className="performance-diagnostic-label">
+        {label}
+        {date && <span className="performance-diagnostic-date"> · {formatShortDate(date)}</span>}
+      </div>
+    </div>
+  );
+}
+
 // Höher-ist-besser (Watt/kg) vs. niedriger-ist-besser (Pace in sec/km) - anhand der Einheit
 // unterschieden, da performance_goals keine explizite Richtung speichert.
 function goalIsMet(actual: number, goal: PerformanceGoal): boolean {
   return goal.unit.includes("sec") ? actual <= goal.target_value : actual >= goal.target_value;
 }
 
-function GoalComparison({ goal, actual }: { goal: PerformanceGoal | undefined; actual: number | null }) {
-  if (!goal || actual === null) return null;
-  const met = goalIsMet(actual, goal);
-  const formattedTarget = goal.unit.includes("sec") ? formatPace(goal.target_value) : `${goal.target_value} ${goal.unit}`;
+// current_value/start_value kommen serverseitig aus echten Garmin-Zeitreihen (siehe
+// GOAL_METRIC_SOURCES/_swim_pace_value in backend/routers/performance.py) - current_value bleibt
+// null, falls für einen Ziel-Typ (noch) kein Ist-Wert vorliegt, dafür wird gar nichts gerendert
+// statt eines erfundenen Vergleichs. start_value ist NICHT an ein manuell gesetztes Startdatum
+// gebunden - ohne eigenes start_date liefert das Backend automatisch die früheste verfügbare
+// Messung als impliziten Start (siehe start_value_date), damit ein Fortschrittsbalken so früh wie
+// möglich entsteht statt auf eine manuelle Eingabe zu warten. Nur wenn wirklich gar keine Historie
+// existiert (start_value null) gibt's die einfache Aktuell/Ziel-Zeile ohne Balken. "Aktuell:"
+// ausdrücklich beschriftet, weil eine Karte mehrere Ziele mit unterschiedlichen Ist-Werten zeigen
+// kann (z.B. Laufen: Schwellenpace UND Marathon-Vorhersage-Pace).
+function GoalProgressBar({ goal, tooltip }: { goal: PerformanceGoal | undefined; tooltip?: string | null }) {
+  if (!goal || goal.current_value == null) return null;
+  const met = goalIsMet(goal.current_value, goal);
+  const unitLabel = unitDisplayLabel(goal.unit);
+  const currentLabel = (
+    <span className={`goal-progress-current${met ? " goal-met" : ""}`}>
+      Aktuell: {formatGoalValue(goal.current_value, goal.unit)} {unitLabel}
+      {met && <Icon name="check" />}
+      {tooltip && <InfoTooltip text={tooltip} />}
+    </span>
+  );
+
+  if (goal.start_value == null || goal.start_value_date == null) {
+    return (
+      <div className="goal-progress">
+        <div className="goal-progress-header">
+          <span>{goal.label}</span>
+          {currentLabel}
+        </div>
+        <p className="goal-progress-labels goal-progress-labels-single">
+          Ziel: {formatGoalValue(goal.target_value, goal.unit)} {unitLabel}
+          {goal.target_date && ` · ${formatShortDate(goal.target_date)}`}
+        </p>
+      </div>
+    );
+  }
+
+  const pct = goalProgressPct(goal.start_value, goal.current_value, goal.target_value, goal.unit);
   return (
-    <p className={`goal-comparison${met ? " goal-met" : ""}`}>
-      Ziel {goal.label}: {formattedTarget}{" "}
-      {met && (
-        <>
-          <Icon name="check" /> erreicht
-        </>
-      )}
-    </p>
+    <div className="goal-progress">
+      <div className="goal-progress-header">
+        <span>{goal.label}</span>
+        {currentLabel}
+      </div>
+      <div className="goal-progress-track">
+        <div className="goal-progress-fill" style={{ width: `${pct}%` }} />
+      </div>
+      <div className="goal-progress-labels">
+        <span>
+          {formatGoalValue(goal.start_value, goal.unit)} {unitLabel} · {formatShortDate(goal.start_value_date)}
+          {/* start_value_date weicht von start_date ab, wenn entweder gar kein Startdatum gesetzt
+              ist ODER vor dem gewählten Startdatum schlichtweg noch keine Garmin-Messung existiert
+              (z.B. weil diese Metrik erst seit Kurzem synchronisiert wird) - beides transparent
+              machen, statt eine "leise" Abweichung vom eingegebenen Datum zu zeigen. */}
+          {goal.start_date !== goal.start_value_date && " (früheste verfügbare Messung)"}
+        </span>
+        <span>
+          {formatGoalValue(goal.target_value, goal.unit)} {unitLabel} ·{" "}
+          {goal.target_date ? formatShortDate(goal.target_date) : "kein Datum"}
+        </span>
+      </div>
+    </div>
   );
 }
 
-function RunThresholdCard({ thresholds, goals }: { thresholds: Thresholds | null; goals: PerformanceGoal[] }) {
-  const marathonGoal = goals.find((g) => g.key === "marathon_pace");
-  const thresholdGoal = goals.find((g) => g.key === "run_threshold_pace");
+// Echter Garmin Race-Predictor (garmin_race_predictions) - die einzige Wettkampf-Prognose in
+// dieser App, die direkt von Garmin kommt statt selbst geschätzt zu sein (siehe CyclingPredictions
+// unten für den Kontrast). Zielzeit-Vergleich nutzt das bestehende marathon_pace-Ziel (Pace * 42,195
+// km), keine zusätzliche Zielzeit-Erfassung nötig.
+function RunRacePredictions({
+  predictions,
+  marathonGoal,
+}: {
+  predictions: RacePredictions | null;
+  marathonGoal: PerformanceGoal | undefined;
+}) {
+  const rows: { label: string; time: number | null; distanceKm: number }[] = [
+    { label: "5 km", time: predictions?.time_5k ?? null, distanceKm: 5 },
+    { label: "10 km", time: predictions?.time_10k ?? null, distanceKm: 10 },
+    { label: "Halbmarathon", time: predictions?.time_half_marathon ?? null, distanceKm: 21.0975 },
+    { label: "Marathon", time: predictions?.time_marathon ?? null, distanceKm: 42.195 },
+  ];
+  const hasData = rows.some((r) => r.time != null);
+  if (!hasData) {
+    return <p className="week-rationale">Noch keine Renn-Vorhersage von Garmin verfügbar.</p>;
+  }
+
+  const marathonTargetSeconds = marathonGoal ? marathonGoal.target_value * 42.195 : null;
+  const marathonDeltaSeconds =
+    marathonTargetSeconds != null && predictions?.time_marathon != null
+      ? predictions.time_marathon - marathonTargetSeconds
+      : null;
+
   return (
-    <div className="card performance-card">
-      <h3>
-        Laufen
-        {thresholds?.run_threshold_date && <span className="tier-kw"> · Stand {formatShortDate(thresholds.run_threshold_date)}</span>}
-      </h3>
-      <div className="performance-metric-value">{formatPace(thresholds?.run_threshold_pace_sec_per_km ?? null)}</div>
-      <p className="week-rationale">Schwellen-HF: {thresholds?.run_threshold_hr ?? "–"} bpm</p>
-      <GoalComparison goal={thresholdGoal} actual={thresholds?.run_threshold_pace_sec_per_km ?? null} />
-      <GoalComparison goal={marathonGoal} actual={thresholds?.run_threshold_pace_sec_per_km ?? null} />
+    <div className="race-prediction-list">
+      {rows.map(
+        (row) =>
+          row.time != null && (
+            <div key={row.label} className="race-prediction-row">
+              <span className="race-prediction-label">{row.label}</span>
+              <span className="race-prediction-time">{formatDuration(row.time)}</span>
+              <span className="race-prediction-pace">{formatPace(row.time / row.distanceKm)}</span>
+            </div>
+          )
+      )}
+      {marathonDeltaSeconds != null && marathonTargetSeconds != null && (
+        <p className={`week-rationale race-prediction-note${marathonDeltaSeconds <= 0 ? " goal-met" : ""}`}>
+          {marathonDeltaSeconds > 0 ? (
+            <>
+              <Icon name="warning" /> Noch +{formatDuration(marathonDeltaSeconds)} über Zielzeit (
+              {formatDuration(marathonTargetSeconds)})
+            </>
+          ) : (
+            <>
+              <Icon name="check" /> Aktuell unter Zielzeit ({formatDuration(marathonTargetSeconds)})
+            </>
+          )}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// Kein Garmin-Pendant zum Lauf-Race-Predictor fürs Rad - Schätzung aus dem eigenen Wirkungsgrad,
+// siehe backend/routers/performance.py::get_cycling_prediction. sample_size macht transparent,
+// wie belastbar die Schätzung gerade ist (wird mit mehr Fahrten automatisch genauer).
+function CyclingRacePredictions({ prediction }: { prediction: CyclingPrediction | null }) {
+  if (!prediction || prediction.sample_size === 0) {
+    return <p className="week-rationale">Noch nicht genug Rad-Aktivitäten mit Leistungsdaten für eine Schätzung.</p>;
+  }
+  return (
+    <div className="race-prediction-list">
+      {prediction.scenarios.map(
+        (s) =>
+          s.estimated_duration_seconds != null && (
+            <div key={s.key} className="race-prediction-row">
+              <span className="race-prediction-label">
+                {s.label} ({s.distance_km.toFixed(0)} km)
+              </span>
+              <span className="race-prediction-time">{formatDuration(s.estimated_duration_seconds)}</span>
+              <span className="race-prediction-pace">
+                {s.estimated_speed_kmh != null ? `${s.estimated_speed_kmh.toFixed(1)} km/h` : "–"}
+              </span>
+            </div>
+          )
+      )}
       <p className="week-rationale">
-        VO2max: {thresholds?.vo2max_running ?? "–"}
-        {thresholds?.vo2max_running_date && ` (Stand ${formatShortDate(thresholds.vo2max_running_date)})`}
+        Grobe Schätzung aus {prediction.sample_size} eigenen Fahrten
+        {prediction.efficiency_kmh_per_watt != null && ` (Ø ${prediction.efficiency_kmh_per_watt.toFixed(3)} km/h pro Watt)`} -
+        wird mit mehr Fahrten belastbarer, Wind/Steigung nicht berücksichtigt.
       </p>
     </div>
   );
 }
 
-function BikeThresholdCard({ thresholds, goals }: { thresholds: Thresholds | null; goals: PerformanceGoal[] }) {
+function RunPerformanceCard({
+  thresholds,
+  goals,
+  racePredictions,
+}: {
+  thresholds: Thresholds | null;
+  goals: PerformanceGoal[];
+  racePredictions: RacePredictions | null;
+}) {
+  const thresholdGoal = goals.find((g) => g.key === "run_threshold_pace");
+  const marathonGoal = goals.find((g) => g.key === "marathon_pace");
+  const halbmarathonGoal = goals.find((g) => g.key === "halbmarathon_pace");
+  return (
+    <div className="card performance-card performance-sport-card">
+      <h3>Laufen</h3>
+
+      <Subsection title="Diagnostik">
+        <div className="performance-diagnostics-row">
+          <DiagnosticItem
+            label="VO2max"
+            value={thresholds?.vo2max_running != null ? `${thresholds.vo2max_running}` : "–"}
+            date={thresholds?.vo2max_running_date}
+          />
+          <DiagnosticItem
+            label="Schwellen-HF"
+            value={thresholds?.run_threshold_hr != null ? `${thresholds.run_threshold_hr} bpm` : "–"}
+            date={thresholds?.run_threshold_date}
+          />
+          <DiagnosticItem
+            label="Schwellenpace"
+            value={formatPace(thresholds?.run_threshold_pace_sec_per_km ?? null)}
+            date={thresholds?.run_threshold_date}
+          />
+        </div>
+      </Subsection>
+
+      <Subsection title="Ziel-Tracking & Fortschritt">
+        <GoalProgressBar goal={thresholdGoal} />
+        <GoalProgressBar goal={marathonGoal} />
+        <GoalProgressBar goal={halbmarathonGoal} />
+      </Subsection>
+
+      <Subsection title="Wettkampf-Prognose">
+        <RunRacePredictions predictions={racePredictions} marathonGoal={marathonGoal} />
+      </Subsection>
+    </div>
+  );
+}
+
+function BikePerformanceCard({
+  thresholds,
+  goals,
+  cyclingPrediction,
+}: {
+  thresholds: Thresholds | null;
+  goals: PerformanceGoal[];
+  cyclingPrediction: CyclingPrediction | null;
+}) {
   const ftpGoal = goals.find((g) => g.key === "ftp_w_per_kg");
   // power_to_weight kommt direkt von Garmin (garmin_cycling_ftp.power_to_weight) - Gewicht für den
   // Tooltip aus Watt/W-pro-kg zurückgerechnet statt eines zusätzlichen Felds/API-Calls.
@@ -179,23 +401,76 @@ function BikeThresholdCard({ thresholds, goals }: { thresholds: Thresholds | nul
       : null;
 
   return (
-    <div className="card performance-card">
-      <h3>
-        Rad
-        {thresholds?.ftp_date && <span className="tier-kw"> · Stand {formatShortDate(thresholds.ftp_date)}</span>}
-      </h3>
-      <div className="performance-metric-value">
-        {thresholds?.ftp_power_to_weight != null ? `${thresholds.ftp_power_to_weight.toFixed(2)} W/kg` : "–"}
-        {ftpTooltip && <InfoTooltip text={ftpTooltip} />}
-      </div>
-      {thresholds?.cycling_threshold_hr != null && (
-        <p className="week-rationale">Schwellen-HF: {thresholds.cycling_threshold_hr} bpm</p>
-      )}
-      <GoalComparison goal={ftpGoal} actual={thresholds?.ftp_power_to_weight ?? null} />
-      <p className="week-rationale">
-        VO2max: {thresholds?.vo2max_cycling ?? "–"}
-        {thresholds?.vo2max_cycling_date && ` (Stand ${formatShortDate(thresholds.vo2max_cycling_date)})`}
-      </p>
+    <div className="card performance-card performance-sport-card">
+      <h3>Rad</h3>
+
+      <Subsection title="Diagnostik">
+        <div className="performance-diagnostics-row">
+          <DiagnosticItem
+            label="VO2max"
+            value={thresholds?.vo2max_cycling != null ? `${thresholds.vo2max_cycling}` : "–"}
+            date={thresholds?.vo2max_cycling_date}
+          />
+          {/* cycling_threshold_hr stammt aus derselben Garmin-Zeile wie run_threshold_date (siehe
+              ThresholdsResponse in backend/routers/performance.py) - kein eigenes Datumsfeld. */}
+          <DiagnosticItem
+            label="Schwellen-HF"
+            value={thresholds?.cycling_threshold_hr != null ? `${thresholds.cycling_threshold_hr} bpm` : "–"}
+            date={thresholds?.run_threshold_date}
+          />
+          <DiagnosticItem
+            label="FTP Leistung"
+            value={thresholds?.ftp_watts != null ? `${thresholds.ftp_watts} W` : "–"}
+            date={thresholds?.ftp_date}
+          />
+        </div>
+      </Subsection>
+
+      <Subsection title="Ziel-Tracking & Fortschritt">
+        <GoalProgressBar goal={ftpGoal} tooltip={ftpTooltip} />
+      </Subsection>
+
+      <Subsection title="Wettkampf-Prognose">
+        <CyclingRacePredictions prediction={cyclingPrediction} />
+      </Subsection>
+    </div>
+  );
+}
+
+function SwimPerformanceCard({ swim, goals }: { swim: SwimDiagnostics | null; goals: PerformanceGoal[] }) {
+  const swimGoal = goals.find((g) => g.key === "swim_pace_100m");
+  const hasData = swim?.swolf != null || swim?.pace_sec_per_100m != null;
+
+  return (
+    <div className="card performance-card performance-sport-card">
+      <h3>Schwimmen</h3>
+
+      <Subsection title="Diagnostik">
+        {hasData ? (
+          <div className="performance-diagnostics-row">
+            <DiagnosticItem
+              label="SWOLF (Pool)"
+              value={swim?.swolf != null ? `${swim.swolf}` : "–"}
+              date={swim?.date}
+            />
+            <DiagnosticItem
+              label="Ø-Pace (Pool)"
+              value={swim?.pace_sec_per_100m != null ? `${formatPace(swim.pace_sec_per_100m).replace("min/km", "min/100m")}` : "–"}
+              date={swim?.date}
+            />
+          </div>
+        ) : (
+          <p className="week-rationale">Noch keine Schwimm-Aktivität mit Pace-Daten synchronisiert.</p>
+        )}
+      </Subsection>
+
+      <Subsection title="Ziel-Tracking & Fortschritt">
+        {swimGoal ? (
+          <GoalProgressBar goal={swimGoal} />
+        ) : (
+          <p className="week-rationale">Noch kein Schwimm-Ziel angelegt (Einstellungen &rarr; Leistungsziele).</p>
+        )}
+      </Subsection>
     </div>
   );
 }
@@ -205,6 +480,9 @@ function PerformanceView() {
   const [loadStatus, setLoadStatus] = useState<LoadStatus | null>(null);
   const [thresholds, setThresholds] = useState<Thresholds | null>(null);
   const [goals, setGoals] = useState<PerformanceGoal[]>([]);
+  const [racePredictions, setRacePredictions] = useState<RacePredictions | null>(null);
+  const [cyclingPrediction, setCyclingPrediction] = useState<CyclingPrediction | null>(null);
+  const [swim, setSwim] = useState<SwimDiagnostics | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -217,6 +495,15 @@ function PerformanceView() {
     fetchPerformanceGoals()
       .then(setGoals)
       .catch(() => setGoals([]));
+    fetchRacePredictions()
+      .then(setRacePredictions)
+      .catch(() => setRacePredictions(null));
+    fetchCyclingPrediction()
+      .then(setCyclingPrediction)
+      .catch(() => setCyclingPrediction(null));
+    fetchSwimDiagnostics()
+      .then(setSwim)
+      .catch(() => setSwim(null));
   }, [today]);
 
   return (
@@ -234,8 +521,9 @@ function PerformanceView() {
       <section>
         <h2 className="performance-section-heading">Leistungsdiagnostik &amp; Schwellenwerte</h2>
         <div className="performance-row">
-          <RunThresholdCard thresholds={thresholds} goals={goals} />
-          <BikeThresholdCard thresholds={thresholds} goals={goals} />
+          <RunPerformanceCard thresholds={thresholds} goals={goals} racePredictions={racePredictions} />
+          <BikePerformanceCard thresholds={thresholds} goals={goals} cyclingPrediction={cyclingPrediction} />
+          <SwimPerformanceCard swim={swim} goals={goals} />
         </div>
       </section>
     </div>

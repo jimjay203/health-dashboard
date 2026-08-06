@@ -908,15 +908,20 @@ def init_db():
         derived_from_race_goal_id INTEGER REFERENCES race_goals(id),
         notes TEXT,
         target_date TEXT,
+        start_date TEXT,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
 
-    # target_date (Datum, bis zu dem das Ziel erreicht sein soll) - nachträglich ergänzte Spalte,
+    # target_date (Datum, bis zu dem das Ziel erreicht sein soll) und start_date (Datum, ab dem der
+    # Fortschritt gemessen wird - siehe backend/routers/performance.py::_metric_value für die
+    # zugehörige Ist-Wert-Ableitung aus echten Garmin-Zeitreihen) - beide nachträglich ergänzt,
     # ALTER TABLE nötig für bereits bestehende Installationen.
     existing_columns = {row[1] for row in cursor.execute("PRAGMA table_info(performance_goals)")}
     if "target_date" not in existing_columns:
         cursor.execute("ALTER TABLE performance_goals ADD COLUMN target_date TEXT")
+    if "start_date" not in existing_columns:
+        cursor.execute("ALTER TABLE performance_goals ADD COLUMN start_date TEXT")
 
     conn.commit()
     conn.close()
