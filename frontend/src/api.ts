@@ -365,6 +365,18 @@ export function deletePerformanceGoal(key: string): Promise<{ success: boolean }
   );
 }
 
+// Gemini-Einschätzung zur Erreichbarkeit der Leistungsziele (siehe performance_insight.py) -
+// gleiches Muster wie fetchBodyTrendInsight/fetchSleepTrendInsight.
+export interface PerformanceGoalsInsight {
+  date: string;
+  insight_text: string;
+  generated_at: string;
+}
+
+export function fetchPerformanceGoalsInsight(): Promise<PerformanceGoalsInsight> {
+  return fetch("/api/performance/goals-insight").then((res) => handle<PerformanceGoalsInsight>(res));
+}
+
 // Sekunden/km -> "4:31 min/km", konsistent für Ist- und Ziel-Pace verwendet.
 export function formatPace(secPerKm: number | null): string {
   if (secPerKm === null) return "–";

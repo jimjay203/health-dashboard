@@ -13,6 +13,7 @@ import {
   fetchCtlTrend,
   fetchThresholds,
   fetchPerformanceGoals,
+  fetchPerformanceGoalsInsight,
   fetchRacePredictions,
   fetchCyclingPrediction,
   fetchSwimDiagnostics,
@@ -20,6 +21,7 @@ import {
   type CtlTrendPoint,
   type Thresholds,
   type PerformanceGoal,
+  type PerformanceGoalsInsight,
   type RacePredictions,
   type CyclingPrediction,
   type SwimDiagnostics,
@@ -615,12 +617,35 @@ function SwimPerformanceCard({ swim, goals }: { swim: SwimDiagnostics | null; go
   );
 }
 
+// Gemini-Einschätzung zur Erreichbarkeit der Ziele + Tipps (siehe performance_insight.py) - volle
+// Kartenbreite oben auf der Seite, da sie über alle Sportart-Karten hinweg einordnet statt zu
+// einer einzelnen zu gehören. .sleep-insight-text ist bewusst generisch benannt (siehe
+// App.css-Kommentar) und wird hier ohne die dort übliche Chart-Flex-Zeile wiederverwendet.
+function GoalsInsightCard({ insight, loading }: { insight: PerformanceGoalsInsight | null; loading: boolean }) {
+  return (
+    <div className="card performance-card">
+      <h3>Einschätzung zu deinen Zielen</h3>
+      {loading && !insight ? (
+        <p className="week-rationale">Lade Einschätzung…</p>
+      ) : insight ? (
+        <p className="sleep-insight-text">{insight.insight_text}</p>
+      ) : (
+        <p className="week-rationale">
+          Noch keine Leistungsziele hinterlegt (Einstellungen &rarr; Leistungsziele).
+        </p>
+      )}
+    </div>
+  );
+}
+
 function PerformanceView() {
   const today = todayIso();
   const [loadStatus, setLoadStatus] = useState<LoadStatus | null>(null);
   const [ctlTrend, setCtlTrend] = useState<CtlTrendPoint[]>([]);
   const [thresholds, setThresholds] = useState<Thresholds | null>(null);
   const [goals, setGoals] = useState<PerformanceGoal[]>([]);
+  const [goalsInsight, setGoalsInsight] = useState<PerformanceGoalsInsight | null>(null);
+  const [goalsInsightLoading, setGoalsInsightLoading] = useState(false);
   const [racePredictions, setRacePredictions] = useState<RacePredictions | null>(null);
   const [cyclingPrediction, setCyclingPrediction] = useState<CyclingPrediction | null>(null);
   const [swim, setSwim] = useState<SwimDiagnostics | null>(null);
@@ -650,9 +675,24 @@ function PerformanceView() {
       .catch(() => setSwim(null));
   }, [today]);
 
+  // Erst nach Laden der Ziele - kein Gemini-Call, solange (noch) keine Ziele hinterlegt sind
+  // (gleiches Gating-Prinzip wie die Trend-Einschätzung auf der Körper-Seite).
+  useEffect(() => {
+    if (goals.length === 0) return;
+    setGoalsInsightLoading(true);
+    fetchPerformanceGoalsInsight()
+      .then(setGoalsInsight)
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setGoalsInsightLoading(false));
+  }, [goals.length]);
+
   return (
     <div className="today-view performance-view">
       {error && <p className="error-banner">Fehler: {error}</p>}
+
+      <section>
+        <GoalsInsightCard insight={goalsInsight} loading={goalsInsightLoading} />
+      </section>
 
       <section>
         <div className="performance-row">

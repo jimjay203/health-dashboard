@@ -25,6 +25,7 @@ from pydantic import BaseModel
 
 from db import get_connection
 import performance_goals
+from performance_insight import generate_goals_insight, get_cached_goals_insight, invalidate_today_cache
 
 router = APIRouter(prefix="/api/performance", tags=["performance"])
 
@@ -594,6 +595,7 @@ def upsert_performance_goal(key: str, body: PerformanceGoalIn) -> PerformanceGoa
         derived_from_race_goal_id=body.derived_from_race_goal_id, notes=body.notes,
         target_date=body.target_date, start_date=body.start_date,
     )
+    invalidate_today_cache()
     conn = get_connection()
     try:
         return _enrich_goal(conn, saved)
@@ -604,4 +606,27 @@ def upsert_performance_goal(key: str, body: PerformanceGoalIn) -> PerformanceGoa
 @router.delete("/goals/{key}")
 def delete_performance_goal(key: str) -> dict:
     performance_goals.delete_performance_goal(key)
+    invalidate_today_cache()
     return {"success": True}
+
+
+# --- Gemini-Einschätzung zur Erreichbarkeit der Leistungsziele (siehe performance_insight.py) ---
+
+class PerformanceGoalsInsightResponse(BaseModel):
+    date: str
+    insight_text: str
+    generated_at: str
+
+
+@router.get("/goals-insight", response_model=PerformanceGoalsInsightResponse)
+def get_goals_insight() -> PerformanceGoalsInsightResponse:
+    """Cache-dann-lazy-generieren, gleiches Muster wie backend/routers/body.py::get_trend_insight."""
+    today = date.today().isoformat()
+    cached = get_cached_goals_insight(today)
+    if cached:
+        return PerformanceGoalsInsightResponse(**cached)
+    try:
+        fresh = generate_goals_insight(today)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Einschätzung konnte nicht generiert werden: {e}")
+    return PerformanceGoalsInsightResponse(**fresh)

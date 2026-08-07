@@ -338,6 +338,15 @@ def init_db():
             insight_text TEXT,
             generated_at TIMESTAMP
         """,
+        # Leistung-Seite, Einschätzung zur Erreichbarkeit der Leistungsziele (siehe
+        # performance_insight.py) - gleiches Muster, zusätzlich bei jeder Ziel-Änderung invalidiert
+        # (performance_insight.py::invalidate_today_cache), da die Ziele selbst hier auf der Seite
+        # bearbeitet werden.
+        "performance_goals_insight": """
+            date TEXT PRIMARY KEY,
+            insight_text TEXT,
+            generated_at TIMESTAMP
+        """,
         # Rolling-Horizon-Wochenplaner (siehe weekly_planner.py) - PK date statt week_id, da
         # Heute-Ansicht/daily_recommendation.py immer "was ist heute geplant" abfragen (ein
         # SELECT...WHERE date=? statt Wochen-Lookup+Tag-Extraktion). week_id bleibt als Spalte für
