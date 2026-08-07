@@ -655,7 +655,6 @@ function PerformanceView() {
       {error && <p className="error-banner">Fehler: {error}</p>}
 
       <section>
-        <h2 className="performance-section-heading">Wochen-Steuerung &amp; Belastung</h2>
         <div className="performance-row">
           <LoadStatusCard loadStatus={loadStatus} ctlTrend={ctlTrend} />
           <LoadFocusBars loadStatus={loadStatus} />
@@ -663,7 +662,6 @@ function PerformanceView() {
       </section>
 
       <section>
-        <h2 className="performance-section-heading">Leistungsdiagnostik &amp; Schwellenwerte</h2>
         <div className="performance-row">
           <RunPerformanceCard thresholds={thresholds} goals={goals} racePredictions={racePredictions} />
           <BikePerformanceCard thresholds={thresholds} goals={goals} cyclingPrediction={cyclingPrediction} />

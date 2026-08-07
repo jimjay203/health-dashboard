@@ -7,7 +7,7 @@ import Icon from "./Icon";
 const PAGE_INFO: Record<View, { title: string; subtitle: string }> = {
   today: { title: "Heute", subtitle: "Dein Trainings-Status auf einen Blick." },
   week: { title: "Woche", subtitle: "Rolling-Horizon-Wochenplan und Trainingsphase." },
-  performance: { title: "Leistung", subtitle: "Trainingsdiagnostik, Belastungssteuerung und Schwellenwerte." },
+  performance: { title: "Leistung", subtitle: "Belastungssteuerung, Trainingsdiagnostik und Schwellenwerte." },
   insights: { title: "Erkenntnisse", subtitle: "Erkenntnis-Gedächtnis: Zusatzinfos in deinen eigenen Worten." },
   settings: { title: "Einstellungen", subtitle: "Vereins-Trainingstermine und Leistungsziele verwalten." },
 };
@@ -25,16 +25,6 @@ const THEME_OPTIONS: { value: ThemeChoice; icon: string; label: string }[] = [
   { value: "system", icon: "desktop_windows", label: "System" },
   { value: "dark", icon: "dark_mode", label: "Dunkel" },
 ];
-
-function formatClock(date: Date): string {
-  const datePart = new Intl.DateTimeFormat("de-DE", {
-    weekday: "long",
-    day: "2-digit",
-    month: "long",
-  }).format(date);
-  const timePart = new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit" }).format(date);
-  return `${datePart} · ${timePart} Uhr`;
-}
 
 function formatSyncTime(iso: string | null): string {
   if (!iso) return "";
@@ -130,13 +120,6 @@ function TopBar({
   onThemeChange: (t: ThemeChoice) => void;
   onMenuClick: () => void;
 }) {
-  const [now, setNow] = useState(new Date());
-
-  useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 30_000);
-    return () => clearInterval(id);
-  }, []);
-
   const { title, subtitle } = PAGE_INFO[view];
 
   return (
@@ -148,7 +131,6 @@ function TopBar({
           <Icon name="menu" />
         </button>
         <div className="top-bar-heading">
-          <div className="top-bar-clock">{formatClock(now)}</div>
           <h1 className="top-bar-title">{title}</h1>
           <p className="top-bar-subtitle">{subtitle}</p>
         </div>

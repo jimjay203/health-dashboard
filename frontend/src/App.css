@@ -193,12 +193,6 @@
   cursor: pointer;
 }
 
-.top-bar-clock {
-  font-size: var(--text-sm);
-  color: var(--text);
-  margin-bottom: 6px;
-}
-
 .top-bar-title {
   margin: 0 0 4px;
 }
@@ -1049,11 +1043,6 @@ button.journal-status-pill {
 
 .performance-view {
   gap: 24px;
-}
-
-.performance-section-heading {
-  text-align: left;
-  margin-bottom: 12px;
 }
 
 .performance-row {
