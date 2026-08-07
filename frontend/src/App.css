@@ -506,6 +506,11 @@
   gap: 4px;
   font: inherit;
   font-size: var(--text-2xs);
+  /* Ohne das trägt v.a. das Material-Symbols-Icon eine viel größere eingebaute Zeilenbox als seine
+     font-size vermuten lässt - .journal-header (align-items:center) streckt sich dann auf diese
+     unsichtbare Höhe statt auf die tatsächliche Pillengröße. Ändert nichts an Schrift/Innenabstand,
+     nur die überschüssige Zeilenhöhe verschwindet. */
+  line-height: 1;
   padding: 4px 10px;
   border-radius: var(--radius-pill);
   border: 1px solid var(--border);
