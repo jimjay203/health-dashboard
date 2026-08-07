@@ -25,6 +25,7 @@ from gemini_client import MODEL_NAME, get_client
 from context_blocks import insight_memory_block, strip_markdown_fences
 from weekly_summary import TAPER_DAYS_THRESHOLD, PEAK_DAYS_THRESHOLD, _days_until_next_race
 from workout_builder import build_interval_running_workout, build_steady_running_workout
+from performance_snapshot import gather_performance_snapshot
 
 WEEKDAY_NAMES = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
 
@@ -78,10 +79,17 @@ PHASE_GUIDANCE = {
 
 SYSTEM_PROMPT = """
 Du bist ein Trainings-Coach-Assistent für einen Marathon-/Triathlon-Athleten. Du planst die
-KOMMENDE Trainingswoche (Montag bis Sonntag) basierend auf der Trainingsphase dieser Woche, der
-zuletzt abgeschlossenen Woche, dem CTL/ATL/TSB-Trend, einem Übertrainings-Signal, festen
-Vereinsterminen, dem Erkenntnis-Gedächtnis, einem Compliance-Vergleich zur Vorwoche (falls
+KOMMENDE Trainingswoche (Montag bis Sonntag) basierend auf der Trainingsphase dieser Woche, den
+hinterlegten Leistungszielen und der aktuellen Leistungsdiagnostik (siehe "LEISTUNGSZIELE &
+DIAGNOSTIK"), der zuletzt abgeschlossenen Woche, dem CTL/ATL/TSB-Trend, einem Übertrainings-Signal,
+festen Vereinsterminen, dem Erkenntnis-Gedächtnis, einem Compliance-Vergleich zur Vorwoche (falls
 vorhanden) und dem nächsten Rennen.
+
+Nutze "LEISTUNGSZIELE & DIAGNOSTIK" konkret: orientiere Zielzonen/-paces an den dort genannten
+Schwellenwerten (Lauf-Schwellenpace/-HF, Rad-FTP) statt sie zu erfinden, und berücksichtige bei
+Zielen mit nahem Zieldatum, dass die verbleibende Zeit knapp werden kann (z.B. mehr
+renn-spezifische Einheiten statt reinem Aufbau, falls die Diagnostik-Werte noch deutlich vom Ziel
+entfernt sind).
 
 Die Trainingsphase dieser Woche (siehe "TRAININGSPHASE DIESER WOCHE") ist der wichtigste Hebel für
 die Wochengestaltung - setze die dort genannte Anweisung aktiv um, nicht nur als Info-Label. Zwei
@@ -337,6 +345,8 @@ def _gather_weekly_context(cursor, week_id, week_start, days, club_slots_by_day,
     parts = [
         "=== TRAININGSPHASE DIESER WOCHE ===",
         _training_phase_block(cursor, week_start),
+        "\n=== LEISTUNGSZIELE & DIAGNOSTIK ===",
+        gather_performance_snapshot(week_start.isoformat()),
         "\n=== LETZTE ABGESCHLOSSENE WOCHE ===",
         _recent_weekly_summary_block(cursor, week_id),
         "\n=== CTL/ATL/TSB-TREND (14 TAGE) ===",
