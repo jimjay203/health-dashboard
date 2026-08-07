@@ -12,16 +12,19 @@ services:
       # Container-Schicht, ging bei Neuerstellung verloren) - und mit dashboard-v2 teilen, damit
       # dessen Auto-Sync (siehe auto_sync.py) keinen eigenen zweiten Passwort-Login braucht.
       - ./garmin_tokens:/root/.garminconnect
-      # Withings-OAuth2-Token (siehe withings_auth.py) - nur hier gemountet, der manuelle
-      # Withings-Sync-Button läuft ausschließlich im Streamlit-Service, noch nicht in dashboard-v2.
+      # Withings-OAuth2-Token (siehe withings_auth.py) - auch mit dashboard-v2 geteilt (dort gibt es
+      # inzwischen ebenfalls einen manuellen Withings-Sync auf der Einstellungsseite, siehe
+      # backend/routers/data_sync.py), damit die einmalige interaktive Autorisierung
+      # (examples/withings_authorize.py) für beide Services reicht.
       - ./withings_tokens:/root/.withings_api
     environment:
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
 
   # Schritt 1 des FastAPI+React-Rebuilds (siehe PROJECT_OVERVIEW.md) - läuft parallel zum
-  # bestehenden Streamlit-Service, teilt sich nur die SQLite-Datei über ./data und den
-  # Garmin-Token-Cache über ./garmin_tokens, sonst komplett unabhängig (eigenes Image, eigener Port).
+  # bestehenden Streamlit-Service, teilt sich nur die SQLite-Datei über ./data sowie den
+  # Garmin-/Withings-Token-Cache über ./garmin_tokens und ./withings_tokens, sonst komplett
+  # unabhängig (eigenes Image, eigener Port).
   dashboard-v2:
     build:
       context: .
@@ -34,6 +37,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./garmin_tokens:/root/.garminconnect
+      - ./withings_tokens:/root/.withings_api
     environment:
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
