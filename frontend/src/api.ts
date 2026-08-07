@@ -133,6 +133,21 @@ export interface ReadinessOverview {
   score: number | null;
   level: string | null;
   feedback_short: string | null;
+  // Garmins Trainingsbereitschafts-Faktoren (garmin_training_readiness) - dieselbe Aufschlüsselung
+  // wie in der Garmin-Connect-App ("Faktoren"-Liste, siehe TodayView.tsx::ReadinessFactorsList).
+  // feedback-Felder sind rohe Garmin-Enums (GOOD/VERY_GOOD/MODERATE/POOR/NONE).
+  sleep_score: number | null;
+  sleep_score_factor_feedback: string | null;
+  recovery_time_minutes: number | null;
+  recovery_time_factor_feedback: string | null;
+  acwr_factor_percent: number | null;
+  acwr_factor_feedback: string | null;
+  hrv_weekly_average: number | null;
+  hrv_factor_feedback: string | null;
+  sleep_history_factor_percent: number | null;
+  sleep_history_factor_feedback: string | null;
+  stress_history_factor_percent: number | null;
+  stress_history_factor_feedback: string | null;
   avg_hrv: number | null;
   // Garmins eigene Einordnung ("BALANCED"/"UNBALANCED"/"LOW", "NONE" während der Onboarding-Phase
   // des Geräts) - roh vom Backend durchgereicht.

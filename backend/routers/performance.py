@@ -53,6 +53,26 @@ class ReadinessOverviewResponse(BaseModel):
     score: int | None = None
     level: str | None = None
     feedback_short: str | None = None
+    # Garmins Trainingsbereitschafts-Faktoren (garmin_training_readiness) - dieselbe Aufschlüsselung
+    # wie in der Garmin-Connect-App selbst ("Faktoren"-Liste). feedback-Felder sind rohe Garmin-
+    # Enums (GOOD/VERY_GOOD/MODERATE/POOR/NONE, ground-truth-verifiziert) - Übersetzung/Ampelfarbe
+    # übernimmt das Frontend, hier unverändert durchgereicht. recovery_time ist in Minuten
+    # gespeichert (Garmins Rohfeld), _percent-Felder sind Garmins eigene 0-100-Beitragswerte pro
+    # Faktor - für acwr/sleep_history/stress_history gibt es keinen separaten Rohwert wie bei
+    # Sleep-Score/HRV, deshalb wird dort bewusst der percent-Wert als "Wert" angezeigt statt einer
+    # erfundenen Kennzahl.
+    sleep_score: int | None = None
+    sleep_score_factor_feedback: str | None = None
+    recovery_time_minutes: int | None = None
+    recovery_time_factor_feedback: str | None = None
+    acwr_factor_percent: int | None = None
+    acwr_factor_feedback: str | None = None
+    hrv_weekly_average: int | None = None
+    hrv_factor_feedback: str | None = None
+    sleep_history_factor_percent: int | None = None
+    sleep_history_factor_feedback: str | None = None
+    stress_history_factor_percent: int | None = None
+    stress_history_factor_feedback: str | None = None
     avg_hrv: float | None = None
     # Garmins eigene Einordnung ("BALANCED"/"UNBALANCED"/"LOW", "NONE" während der Onboarding-Phase
     # des Geräts) - roh durchgereicht, keine erfundene Übersetzung.
@@ -75,7 +95,12 @@ def get_readiness_overview(date_str: str) -> ReadinessOverviewResponse:
     conn = get_connection()
 
     readiness = conn.execute(
-        "SELECT score, level, feedback_short FROM garmin_training_readiness WHERE date = ?",
+        "SELECT score, level, feedback_short, sleep_score, sleep_score_factor_feedback, "
+        "recovery_time AS recovery_time_minutes, recovery_time_factor_feedback, "
+        "acwr_factor_percent, acwr_factor_feedback, hrv_weekly_average, hrv_factor_feedback, "
+        "sleep_history_factor_percent, sleep_history_factor_feedback, "
+        "stress_history_factor_percent, stress_history_factor_feedback "
+        "FROM garmin_training_readiness WHERE date = ?",
         (date_str,)
     ).fetchone()
     daily = conn.execute(
@@ -104,6 +129,18 @@ def get_readiness_overview(date_str: str) -> ReadinessOverviewResponse:
         score=readiness["score"] if readiness else None,
         level=readiness["level"] if readiness else None,
         feedback_short=readiness["feedback_short"] if readiness else None,
+        sleep_score=readiness["sleep_score"] if readiness else None,
+        sleep_score_factor_feedback=readiness["sleep_score_factor_feedback"] if readiness else None,
+        recovery_time_minutes=readiness["recovery_time_minutes"] if readiness else None,
+        recovery_time_factor_feedback=readiness["recovery_time_factor_feedback"] if readiness else None,
+        acwr_factor_percent=readiness["acwr_factor_percent"] if readiness else None,
+        acwr_factor_feedback=readiness["acwr_factor_feedback"] if readiness else None,
+        hrv_weekly_average=readiness["hrv_weekly_average"] if readiness else None,
+        hrv_factor_feedback=readiness["hrv_factor_feedback"] if readiness else None,
+        sleep_history_factor_percent=readiness["sleep_history_factor_percent"] if readiness else None,
+        sleep_history_factor_feedback=readiness["sleep_history_factor_feedback"] if readiness else None,
+        stress_history_factor_percent=readiness["stress_history_factor_percent"] if readiness else None,
+        stress_history_factor_feedback=readiness["stress_history_factor_feedback"] if readiness else None,
         avg_hrv=daily["avg_hrv"] if daily else None,
         hrv_status=daily["hrv_status"] if daily else None,
         hrv_last_night_avg=daily["hrv_last_night_avg"] if daily else None,

@@ -42,7 +42,9 @@ function ReadinessGauge({ score, level }: { score: number | null; level: string 
           }}
           options={{
             cutout: "78%",
-            rotation: -90,
+            // Chart.js' Default (rotation:0) beginnt bereits um 12 Uhr im Uhrzeigersinn - die
+            // vorherigen -90 verschoben den Start um 90° gegen den Uhrzeigersinn auf 9 Uhr.
+            rotation: 0,
             circumference: 360,
             animation: false,
             events: [],

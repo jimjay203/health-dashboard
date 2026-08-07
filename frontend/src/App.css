@@ -1154,8 +1154,9 @@ button.journal-status-pill {
   color: var(--accent);
 }
 
-/* Trainingsbereitschaft (Heute-Seite): Gauge links, Empfehlungs-Kopfzeile rechts daneben -
-   Begründungs-Bullets/Override-Buttons folgen darunter in voller Kartenbreite (siehe TodayView.tsx). */
+/* Trainingsbereitschaft (Heute-Seite): Gauge links, Garmins Faktoren-Liste rechts daneben -
+   Empfehlung heute + Begründungs-Bullets/Override-Buttons folgen darunter in voller Kartenbreite
+   (siehe TodayView.tsx). */
 
 .readiness-card-top {
   display: flex;
@@ -1167,6 +1168,69 @@ button.journal-status-pill {
 
 .readiness-card-gauge-col {
   flex: 0 0 auto;
+}
+
+/* 2 Spalten x 3 Zeilen (siehe TodayView.tsx für die Paar-Reihenfolge) statt einer langen Liste -
+   kompakter neben der Gauge. */
+.readiness-factors-list {
+  flex: 1 1 260px;
+  min-width: 240px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 20px;
+}
+
+.readiness-factor-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+/* Trennlinie nur zwischen den drei Zeilen, nicht zwischen den beiden Spalten (die ersten beiden
+   Grid-Kinder bilden Zeile 1 und bleiben ohne Rand). */
+.readiness-factor-row:nth-child(n + 3) {
+  border-top: 1px solid var(--border);
+}
+
+.readiness-factor-label {
+  font-size: var(--text-sm);
+  color: var(--text-h);
+}
+
+.readiness-factor-value {
+  font-size: var(--text-2xs);
+  color: var(--text);
+  margin-top: 2px;
+}
+
+.readiness-factor-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-sm);
+  color: var(--text);
+  flex-shrink: 0;
+}
+
+.readiness-factor-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.readiness-factor-dot-good {
+  background: var(--accent);
+}
+
+.readiness-factor-dot-moderate {
+  background: #f5a623;
+}
+
+.readiness-factor-dot-poor {
+  background: #e5484d;
 }
 
 .performance-metric-value {
