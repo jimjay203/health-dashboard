@@ -383,6 +383,19 @@ def get_correlations_insight() -> CorrelationsInsightResponse:
     return CorrelationsInsightResponse(**fresh)
 
 
+@router.post("/correlations-insight/regenerate", response_model=CorrelationsInsightResponse)
+def regenerate_correlations_insight() -> CorrelationsInsightResponse:
+    """Erzwingt eine Neu-Generierung unabhängig vom Tages-Cache, gleiches Muster wie
+    backend/routers/weekly_plan.py::regenerate_weekly_plan."""
+    today = date.today().isoformat()
+    try:
+        points = get_sleep_trend(days=28).points
+        fresh = generate_correlations_insight(today, points)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Einordnung konnte nicht generiert werden: {e}")
+    return CorrelationsInsightResponse(**fresh)
+
+
 # --- Gemini-Einordnung des 28-Tage-Trends (siehe sleep_trend_insight.py) ---
 
 class TrendInsightResponse(BaseModel):
@@ -398,6 +411,19 @@ def get_trend_insight() -> TrendInsightResponse:
     cached = get_cached_trend_insight(today)
     if cached:
         return TrendInsightResponse(**cached)
+    try:
+        points = get_sleep_trend(days=28).points
+        fresh = generate_trend_insight(today, points)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Einordnung konnte nicht generiert werden: {e}")
+    return TrendInsightResponse(**fresh)
+
+
+@router.post("/trend-insight/regenerate", response_model=TrendInsightResponse)
+def regenerate_trend_insight() -> TrendInsightResponse:
+    """Erzwingt eine Neu-Generierung unabhängig vom Tages-Cache, gleiches Muster wie
+    backend/routers/weekly_plan.py::regenerate_weekly_plan."""
+    today = date.today().isoformat()
     try:
         points = get_sleep_trend(days=28).points
         fresh = generate_trend_insight(today, points)

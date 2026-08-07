@@ -377,6 +377,12 @@ export function fetchPerformanceGoalsInsight(): Promise<PerformanceGoalsInsight>
   return fetch("/api/performance/goals-insight").then((res) => handle<PerformanceGoalsInsight>(res));
 }
 
+export function regeneratePerformanceGoalsInsight(): Promise<PerformanceGoalsInsight> {
+  return fetch("/api/performance/goals-insight/regenerate", { method: "POST" }).then((res) =>
+    handle<PerformanceGoalsInsight>(res)
+  );
+}
+
 // Sekunden/km -> "4:31 min/km", konsistent für Ist- und Ziel-Pace verwendet.
 export function formatPace(secPerKm: number | null): string {
   if (secPerKm === null) return "–";
@@ -625,6 +631,12 @@ export function fetchSleepCorrelationsInsight(): Promise<SleepCorrelationsInsigh
   return fetch("/api/sleep/correlations-insight").then((res) => handle<SleepCorrelationsInsight>(res));
 }
 
+export function regenerateSleepCorrelationsInsight(): Promise<SleepCorrelationsInsight> {
+  return fetch("/api/sleep/correlations-insight/regenerate", { method: "POST" }).then((res) =>
+    handle<SleepCorrelationsInsight>(res)
+  );
+}
+
 // Gemini-Einordnung des 28-Tage-Trends (siehe sleep_trend_insight.py) - gleiches Muster wie
 // fetchSleepCorrelationsInsight.
 export interface SleepTrendInsight {
@@ -635,6 +647,12 @@ export interface SleepTrendInsight {
 
 export function fetchSleepTrendInsight(): Promise<SleepTrendInsight> {
   return fetch("/api/sleep/trend-insight").then((res) => handle<SleepTrendInsight>(res));
+}
+
+export function regenerateSleepTrendInsight(): Promise<SleepTrendInsight> {
+  return fetch("/api/sleep/trend-insight/regenerate", { method: "POST" }).then((res) =>
+    handle<SleepTrendInsight>(res)
+  );
 }
 
 // Minuten-genauer Phasenverlauf einer einzelnen Nacht (Apple-Health-Vorbild) - nur bei Bedarf pro
@@ -999,6 +1017,12 @@ export interface BodyTrendInsight {
 
 export function fetchBodyTrendInsight(): Promise<BodyTrendInsight> {
   return fetch("/api/body/trend-insight").then((res) => handle<BodyTrendInsight>(res));
+}
+
+export function regenerateBodyTrendInsight(): Promise<BodyTrendInsight> {
+  return fetch("/api/body/trend-insight/regenerate", { method: "POST" }).then((res) =>
+    handle<BodyTrendInsight>(res)
+  );
 }
 
 // Lauf-Zeit-Prognose skaliert direkt proportional zum Gewichtsverhältnis (new_time = current_time

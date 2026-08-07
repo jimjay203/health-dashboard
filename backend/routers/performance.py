@@ -630,3 +630,15 @@ def get_goals_insight() -> PerformanceGoalsInsightResponse:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Einschätzung konnte nicht generiert werden: {e}")
     return PerformanceGoalsInsightResponse(**fresh)
+
+
+@router.post("/goals-insight/regenerate", response_model=PerformanceGoalsInsightResponse)
+def regenerate_goals_insight() -> PerformanceGoalsInsightResponse:
+    """Erzwingt eine Neu-Generierung unabhängig vom Tages-Cache, gleiches Muster wie
+    backend/routers/weekly_plan.py::regenerate_weekly_plan."""
+    today = date.today().isoformat()
+    try:
+        fresh = generate_goals_insight(today)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Einschätzung konnte nicht generiert werden: {e}")
+    return PerformanceGoalsInsightResponse(**fresh)

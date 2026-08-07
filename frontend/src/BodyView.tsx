@@ -7,6 +7,7 @@ import {
   fetchBodyOverview,
   fetchBodyTrend,
   fetchBodyTrendInsight,
+  regenerateBodyTrendInsight,
   fetchBodyWhatIf,
   fetchBodySettings,
   saveBodySettings,
@@ -76,6 +77,47 @@ function InfoTooltip({ text }: { text: string }) {
     <span className="info-tooltip" title={text} tabIndex={0}>
       <Icon name="info" />
     </span>
+  );
+}
+
+// Erzwingt eine Neu-Generierung einer Gemini-Einschätzung unabhängig vom Tages-Cache - gleiches
+// Muster/gleiche Styles (.tier-regenerate-button, "spinning") wie RegenerateButton in
+// WeeklyCalendarWidget.tsx, hier aber generisch über den jeweiligen Insight-Typ.
+function InsightRegenerateButton<T>({
+  regenerateFn,
+  onRegenerated,
+}: {
+  regenerateFn: () => Promise<T>;
+  onRegenerated: (result: T) => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleClick() {
+    setLoading(true);
+    setError(null);
+    try {
+      onRegenerated(await regenerateFn());
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        className={`tier-regenerate-button${loading ? " spinning" : ""}`}
+        onClick={handleClick}
+        disabled={loading}
+        title="Neu generieren"
+      >
+        <Icon name="refresh" />
+      </button>
+      {error && <p className="tier-regenerate-warning">{error}</p>}
+    </>
   );
 }
 
@@ -860,7 +902,12 @@ function BodyView() {
 
       {trend && (
         <div className="card">
-          <h3>Trend (90 Tage)</h3>
+          <h3>
+            Trend (90 Tage)
+            {trendInsight && (
+              <InsightRegenerateButton regenerateFn={regenerateBodyTrendInsight} onRegenerated={setTrendInsight} />
+            )}
+          </h3>
           <div className="sleep-trend-row">
             <div className="sleep-insight-col">
               {trendInsightLoading && !trendInsight ? (

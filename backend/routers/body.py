@@ -119,6 +119,20 @@ def get_trend_insight() -> TrendInsightResponse:
     return TrendInsightResponse(**fresh)
 
 
+@router.post("/trend-insight/regenerate", response_model=TrendInsightResponse)
+def regenerate_trend_insight() -> TrendInsightResponse:
+    """Erzwingt eine Neu-Generierung unabhängig vom Tages-Cache (gleiches Muster wie
+    backend/routers/weekly_plan.py::regenerate_weekly_plan) - generate_trend_insight schreibt über
+    upsert_daily_metric (date als PK), ein vorheriges Löschen ist deshalb nicht nötig."""
+    today = date.today().isoformat()
+    try:
+        points = body_composition.get_body_trend(90)["points"]
+        fresh = generate_trend_insight(today, points)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Einordnung konnte nicht generiert werden: {e}")
+    return TrendInsightResponse(**fresh)
+
+
 # --- What-if-Simulator ---
 
 class RaceTimeProjectionEntry(BaseModel):

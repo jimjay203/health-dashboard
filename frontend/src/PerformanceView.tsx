@@ -14,6 +14,7 @@ import {
   fetchThresholds,
   fetchPerformanceGoals,
   fetchPerformanceGoalsInsight,
+  regeneratePerformanceGoalsInsight,
   fetchRacePredictions,
   fetchCyclingPrediction,
   fetchSwimDiagnostics,
@@ -44,6 +45,48 @@ function InfoTooltip({ text }: { text: string }) {
     <span className="info-tooltip" title={text} tabIndex={0}>
       <Icon name="info" />
     </span>
+  );
+}
+
+// Erzwingt eine Neu-Generierung einer Gemini-Einschätzung unabhängig vom Tages-Cache - gleiches
+// Muster/gleiche Styles (.tier-regenerate-button, "spinning") wie RegenerateButton in
+// WeeklyCalendarWidget.tsx, hier aber generisch über den jeweiligen Insight-Typ statt an
+// Wochenpläne gebunden.
+function InsightRegenerateButton<T>({
+  regenerateFn,
+  onRegenerated,
+}: {
+  regenerateFn: () => Promise<T>;
+  onRegenerated: (result: T) => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleClick() {
+    setLoading(true);
+    setError(null);
+    try {
+      onRegenerated(await regenerateFn());
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        className={`tier-regenerate-button${loading ? " spinning" : ""}`}
+        onClick={handleClick}
+        disabled={loading}
+        title="Neu generieren"
+      >
+        <Icon name="refresh" />
+      </button>
+      {error && <p className="tier-regenerate-warning">{error}</p>}
+    </>
   );
 }
 
@@ -621,10 +664,23 @@ function SwimPerformanceCard({ swim, goals }: { swim: SwimDiagnostics | null; go
 // Kartenbreite oben auf der Seite, da sie über alle Sportart-Karten hinweg einordnet statt zu
 // einer einzelnen zu gehören. .sleep-insight-text ist bewusst generisch benannt (siehe
 // App.css-Kommentar) und wird hier ohne die dort übliche Chart-Flex-Zeile wiederverwendet.
-function GoalsInsightCard({ insight, loading }: { insight: PerformanceGoalsInsight | null; loading: boolean }) {
+function GoalsInsightCard({
+  insight,
+  loading,
+  onRegenerated,
+}: {
+  insight: PerformanceGoalsInsight | null;
+  loading: boolean;
+  onRegenerated: (result: PerformanceGoalsInsight) => void;
+}) {
   return (
     <div className="card performance-card">
-      <h3>Einschätzung zu deinen Zielen</h3>
+      <h3>
+        Einschätzung zu deinen Zielen
+        {insight && (
+          <InsightRegenerateButton regenerateFn={regeneratePerformanceGoalsInsight} onRegenerated={onRegenerated} />
+        )}
+      </h3>
       {loading && !insight ? (
         <p className="week-rationale">Lade Einschätzung…</p>
       ) : insight ? (
@@ -691,7 +747,7 @@ function PerformanceView() {
       {error && <p className="error-banner">Fehler: {error}</p>}
 
       <section>
-        <GoalsInsightCard insight={goalsInsight} loading={goalsInsightLoading} />
+        <GoalsInsightCard insight={goalsInsight} loading={goalsInsightLoading} onRegenerated={setGoalsInsight} />
       </section>
 
       <section>
