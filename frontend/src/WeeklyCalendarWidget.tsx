@@ -15,12 +15,70 @@ import {
   type SportType,
   type WeeklyPlan,
   type WeeklyPlanDay,
+  type ActualActivity,
   type WorkoutDraft,
   type FarWeekBar,
 } from "./api";
 import Icon from "./Icon";
 
 const WEEKDAY_LABELS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+
+// Garmins rohe activity_type-Werte (ground-truth: pages/4_🏃_Aktivitäten.py::SPORT_ICONS deckt die
+// bekannte Werteliste ab, auch wenn im eigenen Konto bisher nur running/cycling/road_biking/
+// lap_swimming aufgetreten sind) - Material-Symbols-Namen statt der dortigen Emoji.
+const ACTIVITY_TYPE_ICON: Record<string, string> = {
+  running: "directions_run",
+  trail_running: "directions_run",
+  treadmill_running: "directions_run",
+  track_running: "directions_run",
+  street_running: "directions_run",
+  indoor_running: "directions_run",
+  ultra_run: "directions_run",
+  cycling: "directions_bike",
+  road_biking: "directions_bike",
+  mountain_biking: "directions_bike",
+  indoor_cycling: "directions_bike",
+  gravel_cycling: "directions_bike",
+  cyclocross: "directions_bike",
+  lap_swimming: "pool",
+  open_water_swimming: "pool",
+  walking: "directions_walk",
+  casual_walking: "directions_walk",
+  speed_walking: "directions_walk",
+  strength_training: "fitness_center",
+  multi_sport: "swap_horiz",
+};
+
+const ACTIVITY_TYPE_LABEL_DE: Record<string, string> = {
+  running: "Laufen",
+  trail_running: "Trail-Lauf",
+  treadmill_running: "Laufband",
+  track_running: "Bahnlauf",
+  street_running: "Straßenlauf",
+  indoor_running: "Indoor-Lauf",
+  ultra_run: "Ultra-Lauf",
+  cycling: "Rad",
+  road_biking: "Rad",
+  mountain_biking: "Mountainbike",
+  indoor_cycling: "Indoor-Rad",
+  gravel_cycling: "Gravel-Rad",
+  cyclocross: "Cyclocross",
+  lap_swimming: "Schwimmen",
+  open_water_swimming: "Freiwasser",
+  walking: "Gehen",
+  casual_walking: "Gehen",
+  speed_walking: "Gehen",
+  strength_training: "Kraft",
+  multi_sport: "Brick",
+};
+
+function activityIconName(activityType: string | null): string {
+  return activityType ? ACTIVITY_TYPE_ICON[activityType] ?? "sports" : "sports";
+}
+
+function activityLabel(activityType: string | null): string {
+  return activityType ? ACTIVITY_TYPE_LABEL_DE[activityType] ?? activityType : "Aktivität";
+}
 
 function isSportType(value: string | null): value is SportType {
   return value !== null && value in SPORT_TYPE_ICON;
@@ -49,16 +107,46 @@ function shortSessionLabel(day: { session_type: string | null; sport_type: strin
   return text.split("(")[0].trim();
 }
 
+// Minuten statt Sekunden (roundedDurationLabel rundet auf eine grobe Leiter für die reduzierte
+// Ansicht - hier soll die tatsächlich absolvierte Dauer exakt stehen, analog zu detail oben).
+function formatActualDuration(seconds: number | null): string | null {
+  if (!seconds) return null;
+  return `${Math.round(seconds / 60)}min`;
+}
+
+// Eine Zeile pro tatsächlich absolvierter Aktivität (garmin_activities) - mehrere möglich (z.B.
+// Brick-Training), deshalb eine Liste statt eines einzelnen Werts.
+function ActualActivityRow({ activity }: { activity: ActualActivity }) {
+  const detail = [
+    formatActualDuration(activity.duration_seconds),
+    activity.distance_meters ? `${(activity.distance_meters / 1000).toFixed(1)}km` : null,
+  ].filter((v): v is string => v !== null);
+  return (
+    <div className="plan-day-actual-row">
+      <Icon name={activityIconName(activity.activity_type)} /> {activityLabel(activity.activity_type)}
+      {detail.length > 0 && <span className="plan-day-actual-detail"> · {detail.join(" · ")}</span>}
+    </div>
+  );
+}
+
 function PlanDay({ day }: { day: WeeklyPlanDay }) {
   const [draft, setDraft] = useState<WorkoutDraft | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
+  const isToday = day.date === todayIso();
+  // Nur echt vergangene Tage (< heute) zeigen Ist statt Plan - "heute" ist noch nicht "abgelaufen",
+  // auch wenn schon eine Aktivität erfasst sein sollte.
+  const isPast = day.date < todayIso();
+
   useEffect(() => {
+    // Für vergangene Tage gibt es keinen Workout-Entwurf-Upload mehr (der Tag ist vorbei) - Fetch
+    // sparen, die Actions-Zeile wird ohnehin nicht gerendert.
+    if (isPast) return;
     fetchWorkoutDraft(day.date)
       .then(setDraft)
       .catch(() => setDraft(null));
-  }, [day.date]);
+  }, [day.date, isPast]);
 
   async function handleUpload() {
     if (!draft?.id) return;
@@ -83,28 +171,71 @@ function PlanDay({ day }: { day: WeeklyPlanDay }) {
   const detail: string[] = [];
   if (day.target_duration_minutes) detail.push(`${day.target_duration_minutes.toFixed(0)}min`);
   if (day.target_distance_m) detail.push(`${(day.target_distance_m / 1000).toFixed(1)}km`);
+  const plannedWorkout = day.sport_type != null;
+  const wasCompleted = day.actual_activities.length > 0;
 
   return (
-    <div className={`plan-day${day.date === todayIso() ? " today" : ""}`}>
+    <div
+      className={`plan-day${isToday ? " today" : ""}${day.is_key_session ? " key-session" : ""}${
+        isPast ? " past" : ""
+      }`}
+    >
       <div className="plan-day-weekday">
         {WEEKDAY_LABELS[day.weekday]} <span className="plan-day-date">{formatShortDate(day.date)}</span>
       </div>
-      <div className="plan-day-icon">
-        <Icon name={planDayIconName(day)} />
-      </div>
-      <div className="plan-day-session">{day.session_type ?? (day.sport_type ? day.sport_type : "Ruhetag")}</div>
-      {(detail.length > 0 || day.target_zone) && (
-        <div className="plan-day-detail">
-          {detail.join(" · ")}
-          {day.target_zone && ` · Zone ${day.target_zone}`}
-        </div>
+
+      {isPast ? (
+        // Vergangener Tag: Ist statt Plan (siehe backend/routers/weekly_plan.py::
+        // _actual_activities_by_date) - die Planung steht bei Abweichung nur noch klein als
+        // Vergleich darunter, ohne Aktivität ("Nicht absolviert") nur, wenn tatsächlich etwas
+        // geplant war - ein geplanter Ruhetag ohne Aktivität ist kein Compliance-Problem.
+        <>
+          {wasCompleted ? (
+            <div className="plan-day-actual-list">
+              {day.actual_activities.map((activity, i) => (
+                <ActualActivityRow key={i} activity={activity} />
+              ))}
+            </div>
+          ) : (
+            <>
+              <div className="plan-day-icon">
+                <Icon name={plannedWorkout ? "cancel" : "bedtime"} />
+              </div>
+              <div className="plan-day-session">{plannedWorkout ? "Nicht absolviert" : "Ruhetag"}</div>
+            </>
+          )}
+          {plannedWorkout && (
+            <div className="plan-day-plan-comparison">
+              Plan: {day.session_type ?? day.sport_type}
+              {detail.length > 0 && ` (${detail.join(" · ")})`}
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <div className="plan-day-icon">
+            <Icon name={planDayIconName(day)} />
+          </div>
+          <div className="plan-day-session">{day.session_type ?? (day.sport_type ? day.sport_type : "Ruhetag")}</div>
+          {/* Nur bei tatsächlicher Sportart - Dauer/Distanz/Zone sind an einem Ruhetag bedeutungslos
+              (Ground-Truth-Fund: weekly_planner.py hat "Zone 1" auf einem Ruhetag ohne sport_type
+              zurückgegeben; backend-seitig jetzt normalisiert, hier zusätzlich defensiv, falls noch
+              ältere ungenerierte Zeilen ohne die Normalisierung angezeigt werden). */}
+          {day.sport_type && (detail.length > 0 || day.target_zone) && (
+            <div className="plan-day-detail">
+              {detail.join(" · ")}
+              {day.target_zone && ` · Zone ${day.target_zone}`}
+            </div>
+          )}
+        </>
       )}
+
       {day.is_key_session && (
         <div className="plan-day-key-badge">
           <Icon name="star" /> Kern-Einheit
         </div>
       )}
-      {draft?.id != null && (
+      {!isPast && draft?.id != null && (
         <div className="plan-day-actions">
           {draft.uploaded ? (
             <span className="plan-day-uploaded">

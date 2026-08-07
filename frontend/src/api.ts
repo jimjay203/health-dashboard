@@ -56,6 +56,16 @@ export type ClubSlotInput = Omit<ClubSlot, "id">;
 
 // --- Rolling-Horizon-Wochenplaner ---
 
+// Tatsächlich absolvierte Aktivität (garmin_activities) - siehe backend/routers/weekly_plan.py::
+// _actual_activities_by_date. Für vergangene Tage zeigt WeeklyCalendarWidget.tsx damit Plan vs.
+// Ist statt weiterhin nur die (überholte) Planung.
+export interface ActualActivity {
+  activity_type: string | null;
+  distance_meters: number | null;
+  duration_seconds: number | null;
+  start_time_local: string | null;
+}
+
 // is_key_session: null nur bei Wettkampftagen (nicht bewertbar) - sonst true/false vom Modell
 // eingeschätzt (siehe weekly_planner.py SYSTEM_PROMPT, Kern- vs. flexible Einheit).
 export interface WeeklyPlanDay {
@@ -71,6 +81,7 @@ export interface WeeklyPlanDay {
   is_club_slot: boolean;
   source: string | null;
   data_quality_flag: string | null;
+  actual_activities: ActualActivity[];
 }
 
 export interface WeeklyPlan {

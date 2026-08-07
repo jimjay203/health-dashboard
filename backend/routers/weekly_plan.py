@@ -42,6 +42,13 @@ def _validate_date(date_str):
 # Diese Woche wird in voller Detailtiefe angezeigt, die beiden Zukunftswochen reduziert, siehe
 # WeeklyCalendarWidget.tsx) ---
 
+class ActualActivity(BaseModel):
+    activity_type: str | None = None
+    distance_meters: float | None = None
+    duration_seconds: float | None = None
+    start_time_local: str | None = None
+
+
 class WeeklyPlanDay(BaseModel):
     date: str
     week_id: str
@@ -55,6 +62,10 @@ class WeeklyPlanDay(BaseModel):
     is_club_slot: bool
     source: str | None = None
     data_quality_flag: str | None = None
+    # Tatsächlich absolvierte Aktivitäten dieses Tages (garmin_activities) - für vergangene Tage
+    # zeigt das Frontend damit "Plan vs. Ist" statt weiterhin nur die (überholte) Planung, siehe
+    # WeeklyCalendarWidget.tsx. Für zukünftige Tage naturgemäß leer.
+    actual_activities: list[ActualActivity] = []
 
 
 class WeeklyPlanResponse(BaseModel):
@@ -70,14 +81,34 @@ class WeeklyPlanResponse(BaseModel):
     already_uploaded_count: int = 0
 
 
+def _actual_activities_by_date(week_start, week_end):
+    """Tatsächlich absolvierte Aktivitäten der Woche, gruppiert nach Kalendertag - gleiche Query
+    wie weekly_planner.py::_compliance_block (dort als Gemini-Kontext-Text, hier strukturiert fürs
+    Frontend)."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT date(start_time_local) AS date, activity_type, distance_meters, duration_seconds, "
+        "start_time_local FROM garmin_activities WHERE date(start_time_local) >= ? "
+        "AND date(start_time_local) <= ? ORDER BY start_time_local",
+        (week_start.isoformat(), week_end.isoformat())
+    ).fetchall()
+    conn.close()
+    by_date: dict[str, list[dict]] = {}
+    for row in rows:
+        by_date.setdefault(row["date"], []).append(dict(row))
+    return by_date
+
+
 def _build_weekly_plan_response(d, rows, already_uploaded_count=0) -> WeeklyPlanResponse:
     iso_year, iso_week, iso_weekday = d.isocalendar()
     week_start = d - timedelta(days=iso_weekday - 1)
     week_end = week_start + timedelta(days=6)
 
+    activities_by_date = _actual_activities_by_date(week_start, week_end)
     for row in rows:
         row["is_club_slot"] = bool(row["is_club_slot"])
         row["is_key_session"] = bool(row["is_key_session"]) if row["is_key_session"] is not None else None
+        row["actual_activities"] = activities_by_date.get(row["date"], [])
 
     return WeeklyPlanResponse(
         week_id=f"{iso_year}-W{iso_week:02d}",

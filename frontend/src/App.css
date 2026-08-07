@@ -653,6 +653,7 @@ button.journal-status-pill {
 
 .calendar-tier-current {
   background: var(--surface);
+  padding: 20px;
 }
 
 .calendar-tier h3 {
@@ -684,9 +685,32 @@ button.journal-status-pill {
   background: var(--surface-2);
 }
 
+/* Heute: orange statt grün - grün ist im Wochenplaner für Kern-Einheiten reserviert (siehe
+   .plan-day.key-session unten), sonst wären beide Hervorhebungen visuell nicht unterscheidbar. */
 .plan-day.today {
-  border-color: var(--accent);
+  border-color: #f5a623;
+  background: rgba(245, 166, 35, 0.1);
+}
+
+/* Kern-Einheit: grüner Rahmen + grüne Fläche auf der ganzen Kachel statt nur grün eingefärbtem
+   Text (siehe .plan-day-key-badge unten, das jetzt neutral bleibt). */
+.plan-day.key-session {
+  border-color: var(--accent-border);
   background: var(--accent-bg);
+}
+
+/* Heute UND Kern-Einheit gleichzeitig: orangener Rahmen (Heute hat Vorrang als Rahmenfarbe, da
+   zeitlich dringlicher) + grüne Fläche (Kern-Einheit bleibt als Fläche erkennbar) - höhere
+   Spezifität als die beiden Einzelregeln oben, gewinnt unabhängig von der Reihenfolge im Stylesheet. */
+.plan-day.today.key-session {
+  border-color: #f5a623;
+  background: var(--accent-bg);
+}
+
+/* Vergangene Tage optisch gedämpft von noch kommenden Tagen abgesetzt - "heute" ist davon
+   ausgenommen (isPast schließt heute per Definition aus, siehe WeeklyCalendarWidget.tsx). */
+.plan-day.past {
+  opacity: 0.65;
 }
 
 .plan-day-weekday {
@@ -743,12 +767,44 @@ button.journal-status-pill {
   margin-top: 4px;
 }
 
-/* Kern-Einheit-Badge (Diese Woche) - dezent, gleicher Stil wie .plan-day-uploaded (kleines
-   Icon+Text statt einer eigenen Box). */
-
+/* Kern-Einheit-Badge (Diese Woche) - die ganze Kachel trägt bereits grünen Rahmen+Fläche (siehe
+   .plan-day.key-session oben), das Badge selbst bleibt deshalb bewusst in normaler Textfarbe statt
+   zusätzlich grün eingefärbt zu sein (sonst wäre Grün doppelt/übermäßig präsent). */
 .plan-day-key-badge {
   font-size: var(--text-2xs);
-  color: var(--accent);
+  color: var(--text);
+  margin-top: 4px;
+}
+
+/* Vergangene Tage: tatsächlich absolvierte Aktivitäten statt Planung (siehe WeeklyCalendarWidget.
+   tsx::PlanDay) - eine Zeile pro Aktivität, plus optional die Planung klein zum Vergleich darunter. */
+
+.plan-day-actual-list {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.plan-day-actual-row {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.plan-day-actual-detail {
+  font-weight: 400;
+  color: var(--text);
+}
+
+.plan-day-plan-comparison {
+  font-size: var(--text-2xs);
+  color: var(--text);
+  opacity: 0.8;
   margin-top: 4px;
 }
 
@@ -858,17 +914,11 @@ button.journal-status-pill {
   margin-top: 1px;
 }
 
-/* Kern-Einheit (is_key_session) in der reduzierten Ansicht: komplett in Akzentfarbe statt der
-   gedämpften Sekundärfarbe, damit sie trotz der reduzierten Darstellung erkennbar bleibt. */
-
+/* Kern-Einheit (is_key_session) in der reduzierten Ansicht: grüner Rahmen + grüne Fläche wie bei
+   .plan-day.key-session (Diese Woche) - konsistent statt nur grün eingefärbtem Text. */
 .compact-plan-day.key-session {
   border-color: var(--accent-border);
-}
-
-.compact-plan-day.key-session .compact-plan-day-icon,
-.compact-plan-day.key-session .compact-plan-day-session,
-.compact-plan-day.key-session .compact-plan-day-duration {
-  color: var(--accent);
+  background: var(--accent-bg);
 }
 
 /* Alles ab Woche 4 (einfachste Ebene) */
