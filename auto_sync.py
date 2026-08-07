@@ -17,6 +17,7 @@ from datetime import date, datetime, time as dt_time, timedelta
 from garminconnect import GarminConnectTooManyRequestsError
 from garmin_auth import get_garmin_client
 from garmin_service import fetch_and_store_garmin_data
+from garmin_activities import sync_activity_list, sync_activity_details
 from daily_recommendation import generate_daily_recommendation
 from weekly_planner import generate_weekly_plan, get_week_plan
 from db import get_connection, upsert_daily_metric
@@ -27,6 +28,24 @@ AUTO_SYNC_CUTOFF_TIME = dt_time(12, 0)
 # gezeigt hat - zu kleine Stichprobe, um daraus ein engeres Intervall abzuleiten (siehe
 # bestehendes, ebenso vorsichtiges 429-Handling in garmin_service.py/garmin_backfill.py).
 AUTO_SYNC_CHECK_INTERVAL_SECONDS = 25 * 60
+
+# Bewusst klein (kein voller Backfill wie beim manuellen Sync auf der Einstellungen-Seite, siehe
+# garmin_activities.py-Docstring) - im Normalfall kommen höchstens 1-2 neue Aktivitäten pro Tag
+# dazu, dieselben Standardwerte wie die manuellen Formularfelder in DataSyncSettings.tsx.
+AUTO_SYNC_ACTIVITY_LIST_LIMIT = 20
+AUTO_SYNC_ACTIVITY_DETAILS_MAX_COUNT = 5
+
+
+def sync_activities_once(
+    client, list_limit=AUTO_SYNC_ACTIVITY_LIST_LIMIT, details_max_count=AUTO_SYNC_ACTIVITY_DETAILS_MAX_COUNT,
+):
+    """Tages-Update der Aktivitätenliste + wenigen offenen Detail-Zeitreihen, mit demselben
+    bereits authentifizierten Client wie der Sleep-Daten-Sync (kein zusätzlicher Login/Rate-
+    Limit-Risiko). Läuft best-effort direkt im Anschluss an einen erfolgreichen Tages-Sync
+    (siehe run_auto_sync_loop) - ein Fehler hier darf den bereits erfolgreichen Sync-Status
+    nicht kippen."""
+    sync_activity_list(client, limit=list_limit)
+    sync_activity_details(client, max_count=details_max_count)
 
 
 def check_sleep_data_available(client, target_date):
@@ -132,6 +151,7 @@ async def run_auto_sync_loop(
     sync_fn=fetch_and_store_garmin_data,
     client_factory=get_garmin_client,
     recommendation_fn=generate_daily_recommendation,
+    activities_sync_fn=sync_activities_once,
     now_fn=datetime.now,
 ):
     """Eine Tages-Schleife: wartet bis start_time, prüft dann im interval_seconds-Takt bis
@@ -170,6 +190,12 @@ async def run_auto_sync_loop(
                 await asyncio.to_thread(recommendation_fn, target_date)
             except Exception as e:
                 print(f"⚠️  auto_sync: Empfehlungsgenerierung fehlgeschlagen: {e}")
+            # Best effort, gleiches Muster: nutzt denselben bereits authentifizierten Client,
+            # ein Fehler hier darf den bereits erfolgreichen Sync-Status nicht kippen.
+            try:
+                await asyncio.to_thread(activities_sync_fn, client)
+            except Exception as e:
+                print(f"⚠️  auto_sync: Aktivitäten-Sync fehlgeschlagen: {e}")
             return "completed"
 
         await asyncio.sleep(interval_seconds)

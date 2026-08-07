@@ -3,6 +3,7 @@ FastAPI-Einstiegspunkt (Schritt 1 des Rebuilds - bewusst inhaltlich leer, siehe 
 Liegt im Container-Image direkt neben db.py und den übrigen Root-Level-Modulen, siehe Dockerfile.
 """
 import asyncio
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -13,6 +14,14 @@ from routers import daily_summary, sync_status, today, club_slots, weekly_plan, 
 from auto_sync import run_daily_auto_sync_forever
 from withings_auto_sync import run_withings_auto_sync_forever
 from db import init_db
+
+# Default an (jede Einzel-Instanz refresht sonst harmlos ihren eigenen Token). Bewusst per Env statt
+# hart im Code deaktivierbar: withings_tokens/credentials.json wird manchmal manuell auf eine zweite
+# Instanz kopiert (z.B. Dev-Rechner -> Server) - Withings rotiert den refresh_token bei jeder
+# Nutzung, zwei Instanzen mit derselben Kopie invalidieren sich dadurch gegenseitig (live beobachtet
+# am 2026-08-07). In so einem Fall muss genau eine Instanz (hier per WITHINGS_AUTO_SYNC_ENABLED=false
+# in der lokalen .env) den Token-Besitz übernehmen.
+WITHINGS_AUTO_SYNC_ENABLED = os.getenv("WITHINGS_AUTO_SYNC_ENABLED", "true").lower() != "false"
 
 
 @asynccontextmanager
@@ -28,10 +37,11 @@ async def lifespan(app: FastAPI):
     # auto_sync.py vs. withings_auto_sync.py) - eigener Takt/Zweck (stündlich statt einmal täglich,
     # hält primär den OAuth2-Token aktiv statt auf ein Verfügbarkeits-Signal zu warten).
     garmin_task = asyncio.create_task(run_daily_auto_sync_forever())
-    withings_task = asyncio.create_task(run_withings_auto_sync_forever())
+    withings_task = asyncio.create_task(run_withings_auto_sync_forever()) if WITHINGS_AUTO_SYNC_ENABLED else None
     yield
     garmin_task.cancel()
-    withings_task.cancel()
+    if withings_task:
+        withings_task.cancel()
 
 
 app = FastAPI(title="Health Dashboard API", lifespan=lifespan)

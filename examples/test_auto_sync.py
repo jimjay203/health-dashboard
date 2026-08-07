@@ -71,6 +71,13 @@ async def test_orchestration_with_fakes():
         # generate_daily_recommendation()-Aufruf für das erfundene TEST_DATE auslösen.
         recommendation_calls.append(target_date)
 
+    activities_sync_calls = []
+
+    def fake_activities_sync(client):
+        # Kein echter Garmin-Aktivitäten-Call hier - ohne dieses Fake würde jeder Testlauf
+        # versuchen, sync_activity_list()/sync_activity_details() mit dem FAKE_CLIENT aufzurufen.
+        activities_sync_calls.append(client)
+
     fake_now = datetime.combine(date.today(), dt_time(7, 0))
 
     def fake_now_fn():
@@ -85,6 +92,7 @@ async def test_orchestration_with_fakes():
         sync_fn=fake_sync,
         client_factory=fake_client_factory,
         recommendation_fn=fake_recommendation,
+        activities_sync_fn=fake_activities_sync,
         now_fn=fake_now_fn,
     )
 
@@ -92,11 +100,13 @@ async def test_orchestration_with_fakes():
     print("Check-Aufrufe:", check_calls)
     print("Sync-Aufrufe:", sync_calls)
     print("Empfehlungs-Aufrufe:", recommendation_calls)
+    print("Aktivitäten-Sync-Aufrufe:", activities_sync_calls)
 
     assert status == "completed"
     assert len(check_calls) == 3
     assert sync_calls == [TEST_DATE]
     assert recommendation_calls == [TEST_DATE]
+    assert activities_sync_calls == ["FAKE_CLIENT"]
 
     db_status = get_status(TEST_DATE)
     print("DB-Status:", db_status)

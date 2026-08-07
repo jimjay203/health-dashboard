@@ -323,7 +323,8 @@ function ActivitiesSection() {
     <div className="data-sync-section">
       <h4>Aktivitäten (Läufe, Rad, Schwimmen)</h4>
       <p className="week-rationale">
-        Bewusst getrennt vom automatischen Tages-/Backfill-Sync und nur manuell hier anstoßbar - eine volle Historie
+        Neue Aktivitäten seit gestern werden automatisch mit im täglichen Auto-Sync erfasst (Liste + wenige offene
+        Detail-Zeitreihen). Die Formulare hier sind für einen großen, seltenen Nachholbedarf - eine volle Historie
         kann mehrere hundert Aktivitäten und pro Aktivität mehrere hundert Detail-Zeilen umfassen.
       </p>
       {summary && (

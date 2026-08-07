@@ -1,8 +1,10 @@
 """
-Aktivitäten-Sync (Läufe, Rad, Schwimmen etc.) - bewusst getrennt von garmin_service.py und
-NICHT Teil des automatischen Tages-/Backfill-Syncs. Wird nur manuell über die Settings-Seite
-angestoßen (siehe pages/3_⚙️_Settings.py), da eine volle Historie mehrere hundert Aktivitäten
-und pro Aktivität mehrere hundert Detail-Zeilen umfassen kann.
+Aktivitäten-Sync (Läufe, Rad, Schwimmen etc.) - bewusst getrennt von garmin_service.py. Ein
+großer, seltener Ein-/Nachholbedarf (volle Historie, hunderte Aktivitäten mit je hunderten
+Detail-Zeilen) bleibt manuell über die Settings-Seite angestoßen (siehe
+pages/3_⚙️_Settings.py bzw. DataSyncSettings.tsx). Das laufende Tagesgeschäft (die 1-2 neuen
+Aktivitäten seit gestern) läuft dagegen automatisch mit kleinen Limits als Teil des täglichen
+Auto-Syncs mit (siehe auto_sync.py::_sync_activities_once).
 """
 import json
 import time
