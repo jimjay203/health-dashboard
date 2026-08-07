@@ -421,6 +421,18 @@ def init_db():
     # plausibel und eindeutig dieser Bug, nicht ein echter Messwert - einmalig automatisch korrigiert.
     cursor.execute("UPDATE garmin_lactate_threshold SET speed = speed * 10 WHERE speed IS NOT NULL AND speed < 1.0")
 
+    # Datenkorrektur (kein Schema-Wechsel): weekly_planner.py hat vor der sport_type-abhängigen
+    # Normalisierung (siehe dortiger Kommentar) an Ruhetagen (sport_type NULL) teils trotzdem
+    # target_zone/-duration/-distance vom Modell übernommen (Ground-Truth-Fund: "Zone 1" auf einem
+    # Ruhetag) - führte auf der Woche-Seite zu unsinnigen Anzeigen wie "Ruhetag · Zone 1". Bereits
+    # generierte Altzeilen bleiben ohne diese Korrektur betroffen, bis sie neu generiert werden -
+    # einmalig automatisch bereinigt statt auf ein manuelles "Woche neu generieren" zu warten.
+    cursor.execute(
+        "UPDATE weekly_plan SET target_zone = NULL, target_duration_minutes = NULL, target_distance_m = NULL "
+        "WHERE sport_type IS NULL AND (target_zone IS NOT NULL OR target_duration_minutes IS NOT NULL "
+        "OR target_distance_m IS NOT NULL)"
+    )
+
     # Chronic/Acute Training Load (PMC-Modell, siehe daily_summary.py) - Erweiterung der
     # bestehenden daily_summary-Tabelle um EWMA-basierte Fitness-/Frische-Kennzahlen.
     daily_summary_columns = {"ctl": "REAL", "atl": "REAL", "tsb": "REAL"}

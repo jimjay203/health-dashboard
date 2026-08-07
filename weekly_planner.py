@@ -489,15 +489,22 @@ def generate_weekly_plan(reference_date):
                 "generated_at": generated_at,
             }
         else:
+            sport_type = entry.get("sport_type") or None
+            # Ruhetag-Normalisierung: target_zone/Dauer/Distanz sind an manchen Ruhetagen trotz
+            # optionalem Schema (siehe RESPONSE_SCHEMA oben, target_zone nicht in "required") vom
+            # Modell trotzdem mitgefüllt worden (Ground-Truth-Fund: "Zone 1" auf einem Ruhetag ohne
+            # sport_type) - ohne Sportart sind diese Werte bedeutungslos, werden hier hart auf None
+            # gesetzt statt sie unverändert weiterzureichen (betrifft auch spätere Gemini-Kontexte,
+            # die diese Zeile roh dumpen, siehe _recent_weekly_summary_block/weekly_plan_block).
             row_data = {
                 "date": day_str,
                 "week_id": week_id,
                 "weekday": day.weekday(),
-                "sport_type": entry.get("sport_type") or None,
+                "sport_type": sport_type,
                 "session_type": entry.get("session_type"),
-                "target_zone": entry.get("target_zone"),
-                "target_duration_minutes": entry.get("target_duration_minutes"),
-                "target_distance_m": entry.get("target_distance_m"),
+                "target_zone": entry.get("target_zone") if sport_type else None,
+                "target_duration_minutes": entry.get("target_duration_minutes") if sport_type else None,
+                "target_distance_m": entry.get("target_distance_m") if sport_type else None,
                 "is_key_session": int(bool(entry.get("is_key_session"))),
                 "is_club_slot": int(club_row is not None),
                 "source": "club" if club_row is not None else "generated",
