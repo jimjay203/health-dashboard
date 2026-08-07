@@ -315,6 +315,22 @@ def init_db():
             override_value TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         """,
+        # Schlaf-Seite, "Korrelationen"-Sektion (siehe sleep_insight.py) - Gemini-Einordnung der vier
+        # Korrelations-Charts, als Cache/Snapshot pro Tag gespeichert (gleiches Muster wie
+        # daily_recommendation - der zugrundeliegende 28-Tage-Trend ändert sich innerhalb eines Tages
+        # nicht, ein Neu-Generieren pro Seitenaufruf wäre unnötiger Gemini-Traffic).
+        "sleep_correlations_insight": """
+            date TEXT PRIMARY KEY,
+            insight_text TEXT,
+            generated_at TIMESTAMP
+        """,
+        # Schlaf-Seite, "Trend (28 Tage)"-Sektion (siehe sleep_trend_insight.py) - gleiches Muster
+        # wie sleep_correlations_insight, nur für die Schlafdauer/-phasen/-regelmäßigkeit-Charts.
+        "sleep_trend_insight": """
+            date TEXT PRIMARY KEY,
+            insight_text TEXT,
+            generated_at TIMESTAMP
+        """,
         # Rolling-Horizon-Wochenplaner (siehe weekly_planner.py) - PK date statt week_id, da
         # Heute-Ansicht/daily_recommendation.py immer "was ist heute geplant" abfragen (ein
         # SELECT...WHERE date=? statt Wochen-Lookup+Tag-Extraktion). week_id bleibt als Spalte für
@@ -336,6 +352,20 @@ def init_db():
             week_rationale_text TEXT,
             data_quality_flag TEXT,
             generated_at TIMESTAMP
+        """,
+        # Habit-Tracker (Schlaf-Seite) - Faktoren, die Garmin nicht liefert, aber den Schlaf
+        # plausibel beeinflussen. Bewusst ein fester, schmaler Satz an Feldern statt eines generischen
+        # Key-Value-Modells (passt zum Rest der App - neue Habits kommen bei Bedarf per ALTER TABLE
+        # dazu, wie bei allen anderen Tabellen hier auch). last_screen_time/last_meal_time als
+        # "HH:MM"-Freitext statt Minuten-Schätzung/vollem Timestamp - eine Uhrzeit ist leichter zu
+        # erinnern, die Minuten bis zur Bettzeit werden serverseitig aus sleep_start_local abgeleitet
+        # (siehe backend/routers/sleep.py).
+        "habit_tracker": """
+            date TEXT PRIMARY KEY,
+            caffeine_after_noon INTEGER,
+            last_screen_time TEXT,
+            last_meal_time TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         """,
     }
     for table_name, columns_sql in daily_tables.items():
@@ -364,6 +394,54 @@ def init_db():
     for column, coltype in training_readiness_columns.items():
         if column not in existing_columns:
             cursor.execute(f"ALTER TABLE garmin_training_readiness ADD COLUMN {column} {coltype}")
+
+    # Schlaf-Seite: weitere, bisher ungenutzte Felder aus derselben get_sleep_data()-Antwort (siehe
+    # garmin_service.py) - kein neuer API-Call, nur zusätzliches Parsing. sleep_start_local/
+    # sleep_end_local als ISO-Datetime-Strings (aus Garmins Epoch-Millisekunden umgerechnet).
+    # recommended_bedtime_*_mins sind Minuten seit Mitternacht des Vortages (können >1440 sein, wenn
+    # das Fenster über Mitternacht reicht - Frontend rechnet das in eine Uhrzeit um).
+    sleep_phases_columns = {
+        "sleep_start_local": "TEXT",
+        "sleep_end_local": "TEXT",
+        "total_duration_qualifier": "TEXT",
+        "stress_qualifier": "TEXT",
+        "restlessness_qualifier": "TEXT",
+        "awake_count_qualifier": "TEXT",
+        "sleep_need_baseline_seconds": "INTEGER",
+        "sleep_need_hrv_adjustment": "TEXT",
+        "sleep_need_training_feedback": "TEXT",
+        "recommended_bedtime_start_mins": "INTEGER",
+        "recommended_bedtime_end_mins": "INTEGER",
+        "restless_moments_count": "INTEGER",
+        "avg_overnight_hrv": "REAL",
+        "body_battery_change": "INTEGER",
+        "avg_skin_temp_deviation_c": "REAL",
+        "avg_sleep_spo2": "REAL",
+        "lowest_sleep_spo2": "REAL",
+        "avg_sleep_respiration": "REAL",
+        "sleep_score_feedback": "TEXT",
+        "sleep_score_insight": "TEXT",
+        "sleep_score_qualifier": "TEXT",
+    }
+    existing_columns = {row[1] for row in cursor.execute("PRAGMA table_info(garmin_sleep_phases)")}
+    for column, coltype in sleep_phases_columns.items():
+        if column not in existing_columns:
+            cursor.execute(f"ALTER TABLE garmin_sleep_phases ADD COLUMN {column} {coltype}")
+
+    # Habit-Tracker: "Alkohol getrunken" wieder entfernt (Nutzer trinkt nicht, Feld war für ihn
+    # irrelevant) - DROP COLUMN statt nur in der UI zu verstecken, um keine tote Spalte
+    # mitzuschleppen. Erfordert SQLite >= 3.35 (hier: 3.46, siehe Docker-Image).
+    existing_columns = {row[1] for row in cursor.execute("PRAGMA table_info(habit_tracker)")}
+    if "alcohol" in existing_columns:
+        cursor.execute("ALTER TABLE habit_tracker DROP COLUMN alcohol")
+
+    # Bildschirmzeit-Slider (Minuten) durch eine Uhrzeit-Eingabe ersetzt (siehe HabitTrackerCard.tsx-
+    # Kommentar) - andere Spalte (Typ + Semantik ändern sich), deshalb Drop+Add statt RENAME COLUMN.
+    existing_columns = {row[1] for row in cursor.execute("PRAGMA table_info(habit_tracker)")}
+    if "screen_time_before_bed_minutes" in existing_columns:
+        cursor.execute("ALTER TABLE habit_tracker DROP COLUMN screen_time_before_bed_minutes")
+    if "last_screen_time" not in existing_columns:
+        cursor.execute("ALTER TABLE habit_tracker ADD COLUMN last_screen_time TEXT")
 
     endurance_score_columns = {
         "classification_intermediate": "INTEGER",

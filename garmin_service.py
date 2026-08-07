@@ -1,13 +1,24 @@
 import json
 import time
 import random
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from garminconnect import GarminConnectTooManyRequestsError
 from garmin_auth import get_garmin_client
 from db import save_garmin_data, upsert_daily_metric, replace_timeseries, upsert_weigh_in, upsert_by_key, get_connection
 from training_zones import recompute_zones
 from daily_summary import compute_daily_summary
 from weekly_summary import compute_weekly_summary
+
+
+def _epoch_ms_local_to_iso(epoch_ms):
+    """Garmins "...TimestampLocal"-Felder sind KEINE echten UTC-Timestamps, sondern UTC-Epoch-
+    Millisekunden, die bereits um den lokalen Zeitzonen-Offset verschoben wurden (ground-truth
+    verifiziert: sleepStartTimestampLocal - sleepStartTimestampGMT = 7200000ms = 2h = CEST-Offset)
+    - utcfromtimestamp() liefert dadurch direkt die korrekte lokale Wanduhrzeit, kein zusätzliches
+    Zeitzonen-Handling nötig."""
+    if epoch_ms is None:
+        return None
+    return datetime.utcfromtimestamp(epoch_ms / 1000.0).isoformat()
 
 
 def _pause():
@@ -120,8 +131,18 @@ def fetch_and_store_garmin_data(target_date=None, client=None):
         deep_pct_obj = sleep_scores.get("deepPercentage") or {}
         light_pct_obj = sleep_scores.get("lightPercentage") or {}
         rem_pct_obj = sleep_scores.get("remPercentage") or {}
+        # Weitere Qualifier aus derselben sleepScores-Struktur, bisher ebenfalls ungenutzt.
+        total_duration_obj = sleep_scores.get("totalDuration") or {}
+        stress_qualifier_obj = sleep_scores.get("stress") or {}
+        restlessness_obj = sleep_scores.get("restlessness") or {}
+        awake_count_obj = sleep_scores.get("awakeCount") or {}
         sleep_need = dto.get("sleepNeed") or {}
         sleep_need_minutes = sleep_need.get("actual")
+        sleep_need_baseline_minutes = sleep_need.get("baseline")
+        # Schlaf-Seite (siehe backend/routers/sleep.py): Bettzeiten für die Regelmäßigkeits-
+        # Auswertung, Garmins eigene Bettzeit-Empfehlung, Overnight-HRV/SpO2/Atmung/Hauttemperatur -
+        # restlessMomentsCount/avgOvernightHrv/bodyBatteryChange/avgSkinTempDeviationC liegen als
+        # Geschwister von dailySleepDTO auf der obersten Ebene der Antwort, nicht darin.
         upsert_daily_metric("garmin_sleep_phases", {
             "date": target_date,
             "deep_sleep_seconds": dto.get("deepSleepSeconds"),
@@ -138,6 +159,27 @@ def fetch_and_store_garmin_data(target_date=None, client=None):
             "avg_sleep_stress": dto.get("avgSleepStress"),
             "avg_sleep_hr": dto.get("avgHeartRate"),
             "sleep_need_seconds": sleep_need_minutes * 60 if sleep_need_minutes is not None else None,
+            "sleep_start_local": _epoch_ms_local_to_iso(dto.get("sleepStartTimestampLocal")),
+            "sleep_end_local": _epoch_ms_local_to_iso(dto.get("sleepEndTimestampLocal")),
+            "total_duration_qualifier": total_duration_obj.get("qualifierKey"),
+            "stress_qualifier": stress_qualifier_obj.get("qualifierKey"),
+            "restlessness_qualifier": restlessness_obj.get("qualifierKey"),
+            "awake_count_qualifier": awake_count_obj.get("qualifierKey"),
+            "sleep_need_baseline_seconds": sleep_need_baseline_minutes * 60 if sleep_need_baseline_minutes is not None else None,
+            "sleep_need_hrv_adjustment": sleep_need.get("hrvAdjustment"),
+            "sleep_need_training_feedback": sleep_need.get("trainingFeedback"),
+            "recommended_bedtime_start_mins": sleep_need.get("recommendedBedtimeStartMins"),
+            "recommended_bedtime_end_mins": sleep_need.get("recommendedBedtimeEndMins"),
+            "restless_moments_count": sleep_data.get("restlessMomentsCount"),
+            "avg_overnight_hrv": sleep_data.get("avgOvernightHrv"),
+            "body_battery_change": sleep_data.get("bodyBatteryChange"),
+            "avg_skin_temp_deviation_c": sleep_data.get("avgSkinTempDeviationC"),
+            "avg_sleep_spo2": dto.get("averageSpO2Value"),
+            "lowest_sleep_spo2": dto.get("lowestSpO2Value"),
+            "avg_sleep_respiration": dto.get("averageRespirationValue"),
+            "sleep_score_feedback": dto.get("sleepScoreFeedback"),
+            "sleep_score_insight": dto.get("sleepScoreInsight"),
+            "sleep_score_qualifier": (sleep_scores.get("overall") or {}).get("qualifierKey"),
         })
 
     # hrvSummary enthält neben dem reinen Zahlenwert auch Garmins eigene Status-Einordnung

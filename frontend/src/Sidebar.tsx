@@ -1,11 +1,12 @@
 import Icon from "./Icon";
 
-export type View = "today" | "week" | "performance" | "insights" | "settings";
+export type View = "today" | "week" | "performance" | "sleep" | "insights" | "settings";
 
 const NAV_ITEMS: { view: View; label: string; icon: string }[] = [
   { view: "today", label: "Heute", icon: "home" },
   { view: "week", label: "Woche", icon: "calendar_month" },
   { view: "performance", label: "Leistung", icon: "trending_up" },
+  { view: "sleep", label: "Schlaf", icon: "bedtime" },
   { view: "insights", label: "Erkenntnisse", icon: "psychology" },
   { view: "settings", label: "Einstellungen", icon: "settings" },
 ];

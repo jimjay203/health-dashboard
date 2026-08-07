@@ -8,6 +8,7 @@ const PAGE_INFO: Record<View, { title: string; subtitle: string }> = {
   today: { title: "Heute", subtitle: "Dein Trainings-Status auf einen Blick." },
   week: { title: "Woche", subtitle: "Rolling-Horizon-Wochenplan und Trainingsphase." },
   performance: { title: "Leistung", subtitle: "Belastungssteuerung, Trainingsdiagnostik und Schwellenwerte." },
+  sleep: { title: "Schlaf", subtitle: "Schlafqualität, Regelmäßigkeit und Einflussfaktoren auf einen Blick." },
   insights: { title: "Erkenntnisse", subtitle: "Erkenntnis-Gedächtnis: Zusatzinfos in deinen eigenen Worten." },
   settings: { title: "Einstellungen", subtitle: "Vereins-Trainingstermine und Leistungsziele verwalten." },
 };

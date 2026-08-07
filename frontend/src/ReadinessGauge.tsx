@@ -20,11 +20,27 @@ const LEVEL_LABELS_DE: Record<string, string> = {
 // Score + Rest), Mittentext als HTML-Overlay statt Canvas-Text (einfacher, folgt normalen
 // CSS-Text-Tokens statt Canvas-fillStyle). --border/--accent werden per useCssVar aufgelöst, da
 // Canvas var() nicht selbst auflösen kann (siehe useCssVar.ts-Kommentar).
-function ReadinessGauge({ score, level }: { score: number | null; level: string | null }) {
+//
+// Generisch gehalten (statusKey/colorMap/labelMap/caption statt fest auf "level"), weil die
+// Schlaf-Seite (SleepScoreGauge, SleepView.tsx) exakt dieselbe Optik braucht, nur mit Garmins
+// Sleep-Score-Qualifiern (EXCELLENT/GOOD/FAIR/POOR) statt Readiness-Levels (LOW/MODERATE/HIGH).
+export function ScoreGauge({
+  score,
+  statusKey,
+  colorMap,
+  labelMap,
+  caption,
+}: {
+  score: number | null;
+  statusKey: string | null;
+  colorMap: Record<string, string>;
+  labelMap: Record<string, string>;
+  caption: string;
+}) {
   const trackColor = useCssVar("--border");
   const accentColor = useCssVar("--accent");
-  const upperLevel = level?.toUpperCase() ?? null;
-  const color = (upperLevel && LEVEL_COLORS[upperLevel]) || accentColor;
+  const upperKey = statusKey?.toUpperCase() ?? null;
+  const color = (upperKey && colorMap[upperKey]) || accentColor;
   const pct = score === null ? 0 : Math.max(0, Math.min(100, score));
 
   return (
@@ -53,18 +69,24 @@ function ReadinessGauge({ score, level }: { score: number | null; level: string 
         />
         <div className="readiness-gauge-center">
           <div className="readiness-gauge-score">{score ?? "–"}</div>
-          <div className="readiness-gauge-caption">DAY SCORE</div>
+          <div className="readiness-gauge-caption">{caption}</div>
         </div>
       </div>
-      {upperLevel && (
+      {upperKey && (
         // Gleiche Optik wie .status-pill (Text-/Randfarbe + halbtransparente Füllung derselben
-        // Farbe) - hier dynamisch pro Level statt fest auf --accent, da Low/Moderate/High
+        // Farbe) - hier dynamisch pro Status statt fest auf --accent, da die Stufen
         // unterschiedliche Farben brauchen.
         <span className="day-score-pill" style={{ color, borderColor: color, backgroundColor: `${color}1a` }}>
-          {LEVEL_LABELS_DE[upperLevel] ?? level}
+          {labelMap[upperKey] ?? statusKey}
         </span>
       )}
     </div>
+  );
+}
+
+function ReadinessGauge({ score, level }: { score: number | null; level: string | null }) {
+  return (
+    <ScoreGauge score={score} statusKey={level} colorMap={LEVEL_COLORS} labelMap={LEVEL_LABELS_DE} caption="DAY SCORE" />
   );
 }
 

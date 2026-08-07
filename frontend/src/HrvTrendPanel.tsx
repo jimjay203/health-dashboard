@@ -89,10 +89,12 @@ function hrvPointColor(value: number | null, baselineLow: number | null, greenCo
 // jeweils breiteste Tick-Label ("100 ms" vs. "-5 bpm" vs. "400") braucht - dadurch verschiebt sich
 // die eigentliche Plot-Fläche zwischen den drei gestapelten Charts, obwohl sie dieselbe Zeitachse
 // teilen sollen. afterFit erzwingt in allen drei Charts dieselbe feste Breite, unabhängig vom
-// tatsächlichen Label-Text, damit x-Achse/Datenpunkte exakt untereinander stehen.
-const Y_AXIS_WIDTH_PX = 42;
+// tatsächlichen Label-Text, damit x-Achse/Datenpunkte exakt untereinander stehen. Auch von den
+// "Trend (28 Tage)"-Charts auf der Schlaf-Seite (SleepView.tsx) importiert - dieselbe Ausrichtung
+// wird dort für Schlafdauer/-phasen/-regelmäßigkeit gebraucht.
+export const Y_AXIS_WIDTH_PX = 42;
 
-function fixedYAxisWidth(scale: { width: number }) {
+export function fixedYAxisWidth(scale: { width: number }) {
   scale.width = Y_AXIS_WIDTH_PX;
 }
 
@@ -103,7 +105,7 @@ function fixedYAxisWidth(scale: { width: number }) {
 // exakt übereinander liegen UND der Rand-Puffer bleibt - ohne ihn würden die äußeren Balken an
 // beiden Enden nur noch zur Hälfte sichtbar sein (ihr Zentrum säße dann exakt auf der Kanten-Tick-
 // Position).
-const X_AXIS_OFFSET = true;
+export const X_AXIS_OFFSET = true;
 
 function HrvBaselineChart({
   trend,

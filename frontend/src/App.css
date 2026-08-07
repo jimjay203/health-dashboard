@@ -1721,6 +1721,388 @@ button.journal-status-pill {
   color: #e5484d;
 }
 
+/* --- Schlaf-Seite (SleepView.tsx) --- */
+
+/* Letzte Nacht + Habit-Tracker nebeneinander, 3/4 zu 1/4 (flex-grow-Verhältnis statt fester
+   Prozentwerte, damit beide beim Umbruch auf schmalen Bildschirmen normal reagieren - gleiches
+   Prinzip wie .performance-card-narrow/-wide). */
+.sleep-card-two-thirds {
+  flex: 3 1 420px;
+}
+
+.sleep-card-one-third {
+  flex: 1 1 220px;
+  max-width: 260px;
+}
+
+.sleep-card-two-thirds h3,
+.sleep-card-one-third h3 {
+  margin-bottom: 12px;
+}
+
+.sleep-card-body-row {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.sleep-gauge-col {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.sleep-badges-col {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.sleep-badges-col .status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-bottom: 0;
+}
+
+.sleep-phase-track {
+  display: flex;
+  height: 10px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.sleep-phase-segment {
+  height: 100%;
+}
+
+.sleep-phase-deep {
+  background: #6366f1;
+}
+
+.sleep-phase-light {
+  background: #38bdf8;
+}
+
+.sleep-phase-rem {
+  background: #a78bfa;
+}
+
+.sleep-phase-awake {
+  background: var(--border);
+}
+
+.sleep-phase-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.sleep-phase-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.sleep-phase-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.sleep-qualifier-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  padding: 3px;
+  border-radius: 50%;
+  margin-left: 2px;
+}
+
+.icon-sideways {
+  display: inline-block;
+  transform: rotate(90deg);
+}
+
+.sleep-qualifier-good {
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.sleep-qualifier-fair {
+  color: #f5a623;
+  background: rgba(245, 166, 35, 0.1);
+}
+
+.sleep-qualifier-poor {
+  color: #e5484d;
+  background: rgba(229, 72, 77, 0.1);
+}
+
+.sleep-levels-chart-block {
+  margin-bottom: 14px;
+}
+
+.sleep-levels-chart-canvas {
+  position: relative;
+  width: 100%;
+  height: 150px;
+}
+
+.sleep-diagrams-col {
+  flex: 3 1 auto;
+  min-width: 0;
+}
+
+.sleep-diagrams-metrics-row {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-bottom: 10px;
+}
+
+.sleep-bedtime-window {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-md);
+  color: var(--text-h);
+  margin-left: auto;
+}
+
+.sleep-diagnostics-col {
+  flex: 2 1 300px;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px 20px;
+  align-content: start;
+}
+
+.sleep-diagnostics-col .performance-diagnostic-label {
+  white-space: nowrap;
+}
+
+/* Gemini-Einordnung links + Charts rechts - geteiltes Layout für "Trend (28 Tage)" und
+   "Korrelationen" (SleepView.tsx). .sleep-insight-col/-text sind bewusst generisch (nicht
+   "-correlations-"/"-trend-" im Namen), da beide Sektionen exakt dieselbe Text-Spalten-Optik
+   brauchen. */
+.sleep-trend-row,
+.sleep-correlations-row {
+  margin-top: 12px;
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.sleep-insight-col {
+  flex: 1 1 260px;
+  min-width: 220px;
+}
+
+.sleep-insight-text {
+  font-size: var(--text-sm);
+  color: var(--text);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+/* .hrv-trend-panel bleibt sonst unverändert (siehe HrvTrendPanel.tsx/Leistung-Seite) - hier nur
+   innerhalb von .sleep-trend-row als Flex-Item mit mehr Breite als die Insight-Spalte. */
+.sleep-trend-row .hrv-trend-panel {
+  flex: 2 1 auto;
+  min-width: 0;
+  margin-top: 0;
+}
+
+.sleep-correlations-grid {
+  flex: 2 1 auto;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+
+/* Eigene (größere) Canvas-Höhe statt der generischen 110px aus .hrv-trend-chart-canvas - bei nur
+   2 Spalten ist mehr Breite pro Chart da, die Scatter-Plots (samt Achsentiteln) brauchen dafür
+   auch mehr Höhe. */
+.sleep-correlations-grid .hrv-trend-chart-canvas {
+  height: 200px;
+}
+
+/* Abweichende Canvas-Höhen ggü. der generischen 110px im "Trend (28 Tage)"-Panel - Regelmäßigkeit
+   hat viel Zeitachsen-Spanne (4-24 Uhr) und profitiert von mehr Höhe, Schlafdauer-Balken kommen
+   dagegen mit weniger Höhe aus. */
+.sleep-duration-chart-block .hrv-trend-chart-canvas {
+  height: 80px;
+}
+
+.sleep-regularity-chart-block .hrv-trend-chart-canvas {
+  height: 170px;
+}
+
+.sleep-need-not-met {
+  color: #f5a623;
+  border-color: rgba(245, 166, 35, 0.4);
+  background: rgba(245, 166, 35, 0.1);
+}
+
+
+/* --- Habit-Tracker (HabitTrackerCard.tsx) --- */
+
+.habit-tracker-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.habit-tracker-row {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.habit-tracker-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-sm);
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.habit-tracker-time-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.habit-tracker-time-field input {
+  font: inherit;
+  color: var(--text-h);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+  width: fit-content;
+}
+
+/* --- Daten-Engine (DataSyncSettings.tsx, Einstellungen-Seite) --- */
+
+.data-sync-section {
+  padding-top: 18px;
+  margin-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.data-sync-section:first-of-type {
+  padding-top: 0;
+  margin-top: 0;
+  border-top: none;
+}
+
+.data-sync-section h4 {
+  margin: 0 0 6px;
+  font-size: var(--text-base);
+  color: var(--text-h);
+}
+
+.data-sync-form-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.data-sync-form-row input {
+  font: inherit;
+  color: var(--text-h);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+}
+
+.data-sync-form-row input[type="number"] {
+  width: 80px;
+}
+
+.data-sync-form-row button {
+  font: inherit;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.data-sync-form-row button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.data-sync-success {
+  color: var(--accent);
+  font-size: var(--text-sm);
+  margin-top: 8px;
+}
+
+.data-sync-progress {
+  margin-top: 12px;
+}
+
+.data-sync-progress-track {
+  height: 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.data-sync-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.data-sync-activities-row {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.data-sync-activities-row .data-sync-section {
+  flex: 1 1 260px;
+  padding-top: 0;
+  margin-top: 0;
+  border-top: none;
+}
+
+.data-sync-toggle-table {
+  font: inherit;
+  font-size: var(--text-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-h);
+  padding: 6px 12px;
+  margin-top: 14px;
+  cursor: pointer;
+}
+
 /* --- Responsive/Mobile --- */
 /* Eine Breakpoint-Stufe (≤768px, gängige Tablet/Phone-Grenze) reicht hier - die App hat keine
    Layouts, die eine zweite Zwischenstufe bräuchten. Die Sidebar ist auf dieser Breite keine
@@ -1797,6 +2179,15 @@ button.journal-status-pill {
   .performance-row,
   .readiness-card-top {
     flex-direction: column;
+  }
+
+  .sleep-trend-row,
+  .sleep-correlations-row {
+    flex-direction: column;
+  }
+
+  .sleep-correlations-grid {
+    grid-template-columns: 1fr;
   }
 
   .club-slots-table {

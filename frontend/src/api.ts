@@ -516,6 +516,253 @@ export function fetchWeekStrip(date: string): Promise<WeekStrip> {
   return fetch(`/api/week-strip/${date}`).then((res) => handle<WeekStrip>(res));
 }
 
+// --- Schlaf-Seite (siehe backend/routers/sleep.py) ---
+
+export interface SleepOverview {
+  date: string;
+  sleep_score: number | null;
+  sleep_hours: number | null;
+  sleep_start_local: string | null;
+  sleep_end_local: string | null;
+  deep_sleep_seconds: number | null;
+  light_sleep_seconds: number | null;
+  rem_sleep_seconds: number | null;
+  awake_sleep_seconds: number | null;
+  deep_pct: number | null;
+  light_pct: number | null;
+  rem_pct: number | null;
+  deep_qualifier: string | null;
+  light_qualifier: string | null;
+  rem_qualifier: string | null;
+  total_duration_qualifier: string | null;
+  stress_qualifier: string | null;
+  restlessness_qualifier: string | null;
+  awake_count: number | null;
+  awake_count_qualifier: string | null;
+  avg_sleep_stress: number | null;
+  avg_sleep_hr: number | null;
+  sleep_need_seconds: number | null;
+  sleep_need_baseline_seconds: number | null;
+  sleep_need_hrv_adjustment: string | null;
+  sleep_need_training_feedback: string | null;
+  // Bereits als "HH:MM"-Uhrzeit formatiert (siehe backend/routers/sleep.py::_mins_to_clock).
+  recommended_bedtime_start: string | null;
+  recommended_bedtime_end: string | null;
+  restless_moments_count: number | null;
+  avg_overnight_hrv: number | null;
+  body_battery_change: number | null;
+  avg_skin_temp_deviation_c: number | null;
+  avg_sleep_spo2: number | null;
+  lowest_sleep_spo2: number | null;
+  avg_sleep_respiration: number | null;
+  sleep_score_feedback: string | null;
+  sleep_score_insight: string | null;
+  sleep_score_qualifier: string | null;
+  sleep_debt_cumulative: number | null;
+  sleep_vs_7d_avg_pct: number | null;
+}
+
+// prev_day_* beschreiben den Vorabend dieser Nacht (Training/Journal/Habits VOR dem Einschlafen,
+// nicht den Tag der Nacht selbst - siehe Datums-Konvention in backend/routers/sleep.py).
+export interface SleepTrendPoint {
+  date: string;
+  sleep_hours: number | null;
+  sleep_score: number | null;
+  deep_pct: number | null;
+  light_pct: number | null;
+  rem_pct: number | null;
+  sleep_start_local: string | null;
+  sleep_end_local: string | null;
+  sleep_need_seconds: number | null;
+  sleep_debt_cumulative: number | null;
+  avg_overnight_hrv: number | null;
+  prev_day_training_load: number | null;
+  prev_day_late_workout: boolean;
+  prev_day_rpe: number | null;
+  prev_day_caffeine_after_noon: boolean | null;
+  // Serverseitig aus habit_tracker.last_screen_time (Vorabend) + sleep_start_local dieser Nacht
+  // abgeleitet (siehe backend/routers/sleep.py::_screen_time_gap_minutes) - kein direkt
+  // eingegebener Wert mehr (Uhrzeit lässt sich leichter erinnern als eine geschätzte Minutenzahl).
+  prev_day_screen_time_gap_minutes: number | null;
+}
+
+export interface SleepTrend {
+  // Ab welcher Uhrzeit ein Training des Vorabends als "spät" gilt (siehe backend/routers/sleep.py::
+  // LATE_WORKOUT_HOUR_THRESHOLD) - eine transparent offengelegte Annahme, keine harte Kennzahl.
+  late_workout_hour_threshold: number;
+  points: SleepTrendPoint[];
+}
+
+export function fetchSleepOverview(date: string): Promise<SleepOverview> {
+  return fetch(`/api/sleep/overview/${date}`).then((res) => handle<SleepOverview>(res));
+}
+
+export function fetchSleepTrend(days = 28): Promise<SleepTrend> {
+  return fetch(`/api/sleep/trend?days=${days}`).then((res) => handle<SleepTrend>(res));
+}
+
+// Gemini-Einordnung der "Korrelationen"-Charts (siehe sleep_insight.py) - Cache-dann-lazy-
+// generieren pro Tag, gleiches Muster wie fetchRecommendation.
+export interface SleepCorrelationsInsight {
+  date: string;
+  insight_text: string;
+  generated_at: string;
+}
+
+export function fetchSleepCorrelationsInsight(): Promise<SleepCorrelationsInsight> {
+  return fetch("/api/sleep/correlations-insight").then((res) => handle<SleepCorrelationsInsight>(res));
+}
+
+// Gemini-Einordnung des 28-Tage-Trends (siehe sleep_trend_insight.py) - gleiches Muster wie
+// fetchSleepCorrelationsInsight.
+export interface SleepTrendInsight {
+  date: string;
+  insight_text: string;
+  generated_at: string;
+}
+
+export function fetchSleepTrendInsight(): Promise<SleepTrendInsight> {
+  return fetch("/api/sleep/trend-insight").then((res) => handle<SleepTrendInsight>(res));
+}
+
+// Minuten-genauer Phasenverlauf einer einzelnen Nacht (Apple-Health-Vorbild) - nur bei Bedarf pro
+// Anfrage aus garmin_daily.raw_json geparst, keine eigene Tabelle (siehe backend/routers/sleep.py).
+export type SleepStage = "deep" | "light" | "rem" | "awake";
+
+export interface SleepLevelSegment {
+  start_local: string;
+  end_local: string;
+  stage: SleepStage;
+}
+
+export interface SleepLevels {
+  date: string;
+  segments: SleepLevelSegment[];
+}
+
+export function fetchSleepLevels(date: string): Promise<SleepLevels> {
+  return fetch(`/api/sleep/levels/${date}`).then((res) => handle<SleepLevels>(res));
+}
+
+// --- Habit-Tracker (siehe habit_tracker.py) - startet auf der Schlaf-Seite, bewusst als
+// eigenständiges Feature gebaut, um später auch außerhalb des Schlaf-Kontexts erweiterbar zu sein. ---
+
+export interface HabitEntry {
+  date: string;
+  caffeine_after_noon: boolean | null;
+  last_screen_time: string | null;
+  last_meal_time: string | null;
+}
+
+export type HabitEntryInput = Omit<HabitEntry, "date"> & {
+  caffeine_after_noon: boolean;
+};
+
+export function fetchHabitEntry(date: string): Promise<HabitEntry> {
+  return fetch(`/api/habit-tracker/${date}`).then((res) => handle<HabitEntry>(res));
+}
+
+export function saveHabitEntry(date: string, entry: HabitEntryInput): Promise<HabitEntry> {
+  return fetch(`/api/habit-tracker/${date}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(entry),
+  }).then((res) => handle<HabitEntry>(res));
+}
+
+// --- Daten-Engine (Einstellungen-Seite, siehe backend/routers/data_sync.py) - die aus Streamlit
+// noch fehlenden Sync-Funktionen: Einzel-Tages-Sync für ein beliebiges Datum, Backfill über einen
+// Zeitraum, Aktivitäten-Sync. Backfill/Aktivitäten-Details laufen als Hintergrund-Task mit
+// Status-Polling statt eines lange blockierenden Requests. ---
+
+export interface DaySyncResult {
+  success: boolean;
+  error: string | null;
+  measurement_count: number | null;
+}
+
+export function syncGarminDay(date: string): Promise<DaySyncResult> {
+  return fetch(`/api/data-sync/garmin-day/${date}`, { method: "POST" }).then((res) => handle<DaySyncResult>(res));
+}
+
+export function syncWithingsDay(date: string): Promise<DaySyncResult> {
+  return fetch(`/api/data-sync/withings-day/${date}`, { method: "POST" }).then((res) => handle<DaySyncResult>(res));
+}
+
+export interface BackfillStatus {
+  running: boolean;
+  current_date: string | null;
+  success_count: number;
+  error_count: number;
+  total: number;
+  stopped_early: boolean;
+  last_error: string | null;
+}
+
+export function startBackfill(startDate: string, endDate: string): Promise<{ started: boolean }> {
+  return fetch(`/api/data-sync/backfill`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ start_date: startDate, end_date: endDate }),
+  }).then((res) => handle<{ started: boolean }>(res));
+}
+
+export function fetchBackfillStatus(): Promise<BackfillStatus> {
+  return fetch(`/api/data-sync/backfill-status`).then((res) => handle<BackfillStatus>(res));
+}
+
+export interface ActivitiesSummary {
+  total_activities: number;
+  pending_details: number;
+}
+
+export function fetchActivitiesSummary(): Promise<ActivitiesSummary> {
+  return fetch(`/api/data-sync/activities-summary`).then((res) => handle<ActivitiesSummary>(res));
+}
+
+export interface ActivityRow {
+  activity_id: number;
+  start_time_local: string | null;
+  activity_type: string | null;
+  activity_name: string | null;
+  distance_km: number | null;
+  has_details_synced: boolean;
+}
+
+export function fetchActivities(limit = 50): Promise<ActivityRow[]> {
+  return fetch(`/api/data-sync/activities?limit=${limit}`).then((res) => handle<ActivityRow[]>(res));
+}
+
+export function syncActivitiesList(limit: number): Promise<{ success: boolean; count: number; error: string | null }> {
+  return fetch(`/api/data-sync/activities-list`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ limit }),
+  }).then((res) => handle<{ success: boolean; count: number; error: string | null }>(res));
+}
+
+export interface ActivityDetailsStatus {
+  running: boolean;
+  current_index: number;
+  total: number;
+  current_activity_name: string | null;
+  synced_count: number;
+  error_count: number;
+  last_error: string | null;
+}
+
+export function startActivityDetailsSync(maxCount: number): Promise<{ started: boolean }> {
+  return fetch(`/api/data-sync/activities-details`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ max_count: maxCount }),
+  }).then((res) => handle<{ started: boolean }>(res));
+}
+
+export function fetchActivityDetailsStatus(): Promise<ActivityDetailsStatus> {
+  return fetch(`/api/data-sync/activities-details-status`).then((res) => handle<ActivityDetailsStatus>(res));
+}
+
 export function fetchClubSlots(): Promise<ClubSlot[]> {
   return fetch(`/api/club-slots`).then((res) => handle<ClubSlot[]>(res));
 }
