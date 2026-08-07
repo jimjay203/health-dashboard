@@ -485,22 +485,41 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 12px;
 }
 
 .journal-header h3 {
   margin: 0;
+  flex-shrink: 0;
 }
 
+/* Titel + Ergebnis-Zeile nebeneinander (siehe JournalCard.tsx) - min-width:0 erlaubt dem Flex-Kind
+   erst, unter seine Inhaltsbreite zu schrumpfen, ohne das würde .journal-summary-line trotz
+   overflow:hidden nie tatsächlich abgeschnitten, sondern die Zeile stattdessen breiter gezogen. */
+.journal-header-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
+/* Bei "Erfasst" ein <button> (übernimmt den Bearbeiten-Klick, siehe JournalCard.tsx), bei "Offen"
+   ein reiner <span> - font/cursor hier zentral gesetzt, damit beide unabhängig vom Element gleich
+   aussehen (Buttons erben Font/Cursor sonst nicht automatisch vom umgebenden Text). */
 .journal-status-pill {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  font: inherit;
   font-size: var(--text-2xs);
   padding: 4px 10px;
   border-radius: var(--radius-pill);
   border: 1px solid var(--border);
   flex-shrink: 0;
+}
+
+button.journal-status-pill {
+  cursor: pointer;
 }
 
 .journal-status-filled {
@@ -521,42 +540,22 @@
   margin-bottom: 12px;
 }
 
-.journal-summary-row {
-  display: flex;
-  gap: 24px;
-  flex-wrap: wrap;
-  margin-bottom: 10px;
+/* Eine Zeile, kein Umbruch - zu langer Inhalt (v.a. bei langen Notizen) wird abgeschnitten statt
+   die Kartenhöhe zu sprengen (siehe JournalCard.tsx). */
+.journal-summary-line {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+  font-size: var(--text-sm);
+  color: var(--text);
+  margin: 0;
 }
 
-.journal-summary-metric-value {
-  font-size: var(--text-lg);
+.journal-summary-value {
   font-weight: 600;
   color: var(--text-h);
-}
-
-.journal-summary-metric-label {
-  font-size: var(--text-2xs);
-  color: var(--text);
-}
-
-.journal-notes {
-  font-size: var(--text-sm);
-  color: var(--text);
-  margin: 0 0 12px;
-}
-
-.journal-edit-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font: inherit;
-  font-size: var(--text-sm);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  color: var(--text-h);
-  padding: 6px 12px;
-  cursor: pointer;
 }
 
 .journal-form {

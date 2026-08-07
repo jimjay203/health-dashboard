@@ -104,39 +104,40 @@ function JournalCard({ date }: { date: string }) {
   return (
     <div className="card journal-card">
       <div className="journal-header">
-        <h3>Subjektives Tagesjournal &amp; Befinden</h3>
-        {!loading && (
-          <span className={`journal-status-pill${filled ? " journal-status-filled" : " journal-status-open"}`}>
-            <Icon name={filled ? "check_circle" : "schedule"} /> {filled ? "Erfasst" : "Offen"}
-          </span>
-        )}
+        <div className="journal-header-title-row">
+          <h3>Subjektives Tagesjournal &amp; Befinden</h3>
+          {/* In derselben Zeile wie der Titel statt darunter - eine einzige, nicht umbrechende
+              Zeile, so kompakt wie möglich, sobald erfasst. Wird der Inhalt (inkl. Notizen) zu
+              lang für die verfügbare Breite, schneidet CSS (min-width:0 + white-space:nowrap +
+              text-overflow:ellipsis) statt umzubrechen oder die Karte höher zu machen - volle
+              Notiz bleibt über "Bearbeiten" weiterhin einsehbar. */}
+          {filled && !editing && journal && (
+            <p className="journal-summary-line">
+              <span className="journal-summary-value">{journal.rpe_score}/10</span> RPE ·{" "}
+              <span className="journal-summary-value">{journal.muscle_soreness}/5</span> Muskelkater/Frische ·{" "}
+              <span className="journal-summary-value">{journal.energy_level}/5</span> Energie
+              {journal.notes && <> · {journal.notes}</>}
+            </p>
+          )}
+        </div>
+        {!loading &&
+          (filled ? (
+            // Pille übernimmt gleich den Bearbeiten-Klick - spart die separate "Bearbeiten"-Zeile
+            // unter der Zusammenfassung, damit die Karte nach dem Erfassen so kompakt wie möglich
+            // bleibt. "Offen" bleibt reine Statusanzeige (kein eigener Klick nötig, das Formular
+            // ist in dem Fall ohnehin schon aufgeklappt).
+            <button type="button" className="journal-status-pill journal-status-filled" onClick={handleEditClick}>
+              <Icon name="edit" /> Erfasst
+            </button>
+          ) : (
+            <span className="journal-status-pill journal-status-open">
+              <Icon name="schedule" /> Offen
+            </span>
+          ))}
       </div>
 
       {error && <p className="error-banner">Fehler: {error}</p>}
       {warning && <p className="journal-warning">{warning}</p>}
-
-      {filled && !editing && journal && (
-        <>
-          <div className="journal-summary-row">
-            <div className="journal-summary-metric">
-              <div className="journal-summary-metric-value">{journal.rpe_score}/10</div>
-              <div className="journal-summary-metric-label">Belastung (RPE)</div>
-            </div>
-            <div className="journal-summary-metric">
-              <div className="journal-summary-metric-value">{journal.muscle_soreness}/5</div>
-              <div className="journal-summary-metric-label">Muskelkater / Frische</div>
-            </div>
-            <div className="journal-summary-metric">
-              <div className="journal-summary-metric-value">{journal.energy_level}/5</div>
-              <div className="journal-summary-metric-label">Energielevel</div>
-            </div>
-          </div>
-          {journal.notes && <p className="journal-notes">{journal.notes}</p>}
-          <button type="button" className="journal-edit-toggle" onClick={handleEditClick}>
-            <Icon name="edit" /> Bearbeiten
-          </button>
-        </>
-      )}
 
       {editing && (
         <form className="journal-form" onSubmit={handleSubmit}>
