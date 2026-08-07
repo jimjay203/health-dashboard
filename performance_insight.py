@@ -21,6 +21,7 @@ from google.genai import types
 from db import get_connection, upsert_daily_metric
 from gemini_client import MODEL_NAME, get_client
 from context_blocks import strip_markdown_fences, insight_memory_block
+from load_focus import compute_load_focus, LOAD_FOCUS_WINDOW_DAYS
 import performance_goals
 
 RESPONSE_SCHEMA = {
@@ -69,7 +70,6 @@ TSB_BANDS = [
     (25, 1e9, "Formverlust-Risiko"),
 ]
 
-LOAD_FOCUS_WINDOW_DAYS = 28
 CTL_TREND_WINDOW_DAYS = 90
 
 # Zielstrecken/Intensitäten für die Rad-Wettkampf-Schätzung - identisch zu
@@ -169,24 +169,21 @@ def _load_status_block(conn, target_date):
     return text, (daily["ctl"], daily["tsb"])
 
 
-def _load_focus_block(conn, target_date):
-    start = (date.fromisoformat(target_date) - timedelta(days=LOAD_FOCUS_WINDOW_DAYS)).isoformat()
-    row = conn.execute(
-        "SELECT SUM(hr_zone_1) AS z1, SUM(hr_zone_2) AS z2, SUM(hr_zone_3) AS z3, "
-        "SUM(hr_zone_4) AS z4, SUM(hr_zone_5) AS z5 FROM garmin_activities "
-        "WHERE date(start_time_local) >= ? AND date(start_time_local) <= ?",
-        (start, target_date)
-    ).fetchone()
-    z1, z2, z3, z4, z5 = (row[k] or 0.0 for k in ("z1", "z2", "z3", "z4", "z5"))
-    total = z1 + z2 + z3 + z4 + z5
-    if total <= 0:
-        return f"Belastungsfokus (letzte {LOAD_FOCUS_WINDOW_DAYS} Tage): keine Herzfrequenz-Zonen-Daten vorhanden."
-    anaerobic = (z4 + z5) / total * 100
-    high_aerobic = z3 / total * 100
-    low_aerobic = (z1 + z2) / total * 100
+def _load_focus_block(target_date):
+    """Nutzt load_focus.py (App-eigene Friel-HF-Zonen statt Garmins eigenen hrTimeInZone-Werten,
+    siehe dortiger Ground-Truth-Fund vom 2026-08-07) - included_activities/total_activities_in_window
+    werden explizit mitgegeben, damit Gemini die Aussagekraft bei geringer Abdeckung einordnen kann."""
+    lf = compute_load_focus(target_date, window_days=LOAD_FOCUS_WINDOW_DAYS)
+    if lf["low_aerobic_pct"] is None:
+        return (
+            f"Belastungsfokus (letzte {LOAD_FOCUS_WINDOW_DAYS} Tage): keine auswertbaren "
+            "HF-Zeitreihen vorhanden (nur Laufen/Rad mit synchronisierter Detail-Zeitreihe möglich)."
+        )
     return (
-        f"Belastungsfokus (letzte {LOAD_FOCUS_WINDOW_DAYS} Tage): niedrig-aerob(Z1+Z2)={low_aerobic:.0f}%, "
-        f"hoch-aerob(Z3)={high_aerobic:.0f}%, anaerob(Z4+Z5)={anaerobic:.0f}% "
+        f"Belastungsfokus (letzte {LOAD_FOCUS_WINDOW_DAYS} Tage, berechnet aus {lf['included_activities']} von "
+        f"{lf['total_activities_in_window']} Aktivitäten im Fenster - nur Laufen/Rad mit synchronisierter "
+        f"Detail-Zeitreihe auswertbar): niedrig-aerob(Z1+Z2)={lf['low_aerobic_pct']:.0f}%, "
+        f"hoch-aerob(Z3)={lf['high_aerobic_pct']:.0f}%, anaerob(Z4+Z5)={lf['anaerobic_pct']:.0f}% "
         f"(gängiger Polarisierungsrichtwert: niedrig-aerob ≥70%)."
     )
 
@@ -364,7 +361,7 @@ def _gather_context(target_date):
         cursor = conn.cursor()
         memory_text = insight_memory_block(cursor)
         load_status_text, _ = _load_status_block(conn, target_date)
-        load_focus_text = _load_focus_block(conn, target_date)
+        load_focus_text = _load_focus_block(target_date)
         thresholds = _thresholds(conn)
         race_predictions = _race_predictions(conn)
         cycling = _cycling_prediction(conn)

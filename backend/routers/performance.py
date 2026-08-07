@@ -26,6 +26,7 @@ from pydantic import BaseModel
 from db import get_connection
 import performance_goals
 from performance_insight import generate_goals_insight, get_cached_goals_insight, invalidate_today_cache
+from load_focus import compute_load_focus
 
 router = APIRouter(prefix="/api/performance", tags=["performance"])
 
@@ -183,28 +184,12 @@ def _classify_training_state(tsb):
     return None, None
 
 
-# Belastungsfokus-Verteilung: Garmins metricsTrainingLoadBalanceDTOMap war für dieses Konto in
-# JEDEM bisher synchronisierten Tag null (separater Ground-Truth-Fund) - eigene Berechnung aus
-# garmin_activities.hr_zone_1..5 (zuverlässig pro Aktivität synchronisiert) statt darauf zu warten.
-# Zonen-Mapping folgt derselben 3-Zonen-Polarisierungs-Logik wie weekly_summary.py/PerformanceView
-# (Z1+Z2 = Niedrig-Aerob, Z3 = Hoch-Aerob, Z4+Z5 = Anaerob). Rollierendes 28-Tage-Fenster, gleiche
-# Fensterlänge wie training_load_28d in daily_summary.py.
-LOAD_FOCUS_WINDOW_DAYS = 28
-
-
-def _compute_load_focus(conn, date_str):
-    start = (datetime.strptime(date_str, "%Y-%m-%d").date() - timedelta(days=LOAD_FOCUS_WINDOW_DAYS)).isoformat()
-    row = conn.execute(
-        "SELECT SUM(hr_zone_1) AS z1, SUM(hr_zone_2) AS z2, SUM(hr_zone_3) AS z3, "
-        "SUM(hr_zone_4) AS z4, SUM(hr_zone_5) AS z5 FROM garmin_activities "
-        "WHERE date(start_time_local) >= ? AND date(start_time_local) <= ?",
-        (start, date_str)
-    ).fetchone()
-    z1, z2, z3, z4, z5 = (row[k] or 0.0 for k in ("z1", "z2", "z3", "z4", "z5"))
-    total = z1 + z2 + z3 + z4 + z5
-    if total <= 0:
-        return None, None, None
-    return (z4 + z5) / total * 100, z3 / total * 100, (z1 + z2) / total * 100
+# Belastungsfokus-Verteilung: berechnet aus den App-eigenen Friel-HF-Zonen statt Garmins eigenen
+# hrTimeInZone-Werten (siehe load_focus.py - Ground-Truth-Fund vom 2026-08-07: Garmins Zonen
+# weichen für dieses Konto massiv von der schwellen-HF-basierten Friel-Einteilung ab, 5% vs. 86%
+# niedrig-aerob an denselben 12 Läufen verglichen). Garmins metricsTrainingLoadBalanceDTOMap war
+# zuvor schon für JEDEN bisher synchronisierten Tag null (separater Ground-Truth-Fund) - kam als
+# Datenquelle also ohnehin nie infrage.
 
 
 class LoadStatusResponse(BaseModel):
@@ -221,6 +206,10 @@ class LoadStatusResponse(BaseModel):
     load_focus_anaerobic_pct: float | None = None
     load_focus_high_aerobic_pct: float | None = None
     load_focus_low_aerobic_pct: float | None = None
+    # Transparenz (siehe load_focus.py) - wie viele Aktivitäten im Fenster tatsächlich in die
+    # Verteilung eingeflossen sind (nur Laufen/Rad mit synchronisierter Detail-Zeitreihe möglich).
+    load_focus_included_activities: int = 0
+    load_focus_total_activities: int = 0
 
 
 @router.get("/load-status/{date_str}", response_model=LoadStatusResponse)
@@ -232,8 +221,8 @@ def get_load_status(date_str: str) -> LoadStatusResponse:
         "ORDER BY date DESC LIMIT 1",
         (date_str,)
     ).fetchone()
-    anaerobic_pct, high_aerobic_pct, low_aerobic_pct = _compute_load_focus(conn, date_str)
     conn.close()
+    load_focus = compute_load_focus(date_str)
 
     training_state_key, training_state_label = _classify_training_state(daily["tsb"] if daily else None)
 
@@ -244,9 +233,11 @@ def get_load_status(date_str: str) -> LoadStatusResponse:
         tsb=daily["tsb"] if daily else None,
         training_state_key=training_state_key,
         training_state_label=training_state_label,
-        load_focus_anaerobic_pct=anaerobic_pct,
-        load_focus_high_aerobic_pct=high_aerobic_pct,
-        load_focus_low_aerobic_pct=low_aerobic_pct,
+        load_focus_anaerobic_pct=load_focus["anaerobic_pct"],
+        load_focus_high_aerobic_pct=load_focus["high_aerobic_pct"],
+        load_focus_low_aerobic_pct=load_focus["low_aerobic_pct"],
+        load_focus_included_activities=load_focus["included_activities"],
+        load_focus_total_activities=load_focus["total_activities_in_window"],
     )
 
 

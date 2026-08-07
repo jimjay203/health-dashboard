@@ -240,9 +240,10 @@ function LoadStatusCard({ loadStatus, ctlTrend }: { loadStatus: LoadStatus | nul
 }
 
 const LOAD_FOCUS_TOOLTIP =
-  "Eigene Berechnung aus den HF-Zonen-Zeiten der letzten 28 Tage (Z1+Z2 = Niedrig-Aerob, Z3 = " +
-  "Hoch-Aerob, Z4+Z5 = Anaerob) - Garmins eigene Verteilung liefert für dieses Konto durchgängig " +
-  "keine Daten, siehe Ground-Truth-Fund in backend/routers/performance.py.";
+  "Eigene Berechnung aus den App-eigenen Friel-HF-Zonen (Z1+Z2 = Niedrig-Aerob, Z3 = Hoch-Aerob, " +
+  "Z4+Z5 = Anaerob) statt Garmins eigenen Zonen-Werten - Garmins Zonen wichen für dieses Konto " +
+  "massiv von der schwellen-HF-basierten Einteilung ab, siehe load_focus.py. Nur für Laufen/Rad " +
+  "mit synchronisierter Detail-Zeitreihe möglich.";
 
 // Dieselbe Ampel-Logik wie überall sonst in der App (grün/orange/rot, siehe --accent/HRV-Bereich) -
 // Niedrig-Aerob grün, da das hier die Zielzone ist (Polarisierungs-Ziel ≥70%). Nur Niedrig-Aerob
@@ -290,6 +291,12 @@ function LoadFocusBars({ loadStatus }: { loadStatus: LoadStatus | null }) {
               <span className="load-focus-pct">{(bar.pct ?? 0).toFixed(0)}%</span>
             </div>
           ))}
+          {loadStatus && loadStatus.load_focus_total_activities > 0 && (
+            <p className="week-rationale">
+              Basiert auf {loadStatus.load_focus_included_activities} von {loadStatus.load_focus_total_activities}{" "}
+              Aktivitäten im Fenster (nur Laufen/Rad mit synchronisierter Detail-Zeitreihe auswertbar).
+            </p>
+          )}
         </>
       ) : (
         <p className="week-rationale">

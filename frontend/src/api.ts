@@ -184,12 +184,15 @@ export interface LoadStatus {
   tsb: number | null;
   training_state_key: string | null;
   training_state_label: string | null;
-  // Eigene Berechnung aus HF-Zonen-Zeiten (garmin_activities.hr_zone_1..5, 28-Tage-Fenster) -
-  // Garmins eigene Verteilung liefert für dieses Konto durchgängig keine Daten, siehe
-  // backend/routers/performance.py-Docstring (Ground-Truth-Fund).
+  // Eigene Berechnung aus den App-eigenen Friel-HF-Zonen (siehe load_focus.py) statt Garmins
+  // eigenen hrTimeInZone-Werten - Ground-Truth-Fund vom 2026-08-07: Garmins Zonen weichen für
+  // dieses Konto massiv von der schwellen-HF-basierten Friel-Einteilung ab. Nur für Laufen/Rad mit
+  // synchronisierter Detail-Zeitreihe möglich, siehe load_focus_included_activities.
   load_focus_anaerobic_pct: number | null;
   load_focus_high_aerobic_pct: number | null;
   load_focus_low_aerobic_pct: number | null;
+  load_focus_included_activities: number;
+  load_focus_total_activities: number;
 }
 
 export interface CtlTrendPoint {
