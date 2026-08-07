@@ -882,3 +882,199 @@ export function weekAfterNextMondayIso(): string {
   weekAfterNext.setDate(now.getDate() + daysUntilNextMonday + 7);
   return formatIso(weekAfterNext);
 }
+
+// --- Körper-Seite (siehe backend/routers/body.py/body_composition.py) ---
+
+// body_water_kg ist trotz des Feldnamens eine Wassermasse in kg, kein Prozentwert (Withings-
+// Messtyp "Hydration" liefert eine Masse) - siehe body_composition.py-Moduldocstring.
+// hydration_status: "normal" | "erhöht" - grobe Bevölkerungs-Referenz (siehe
+// body_composition.py::HYDRATION_HIGH_THRESHOLD_PCT), keine personalisierte Bewertung.
+// ffmi_classification: siehe body_composition.py::FFMI_CLASSIFICATION_BANDS (eine von mehreren
+// gängigen Einteilungen, mit Quellenangabe im Frontend-Tooltip).
+export interface BodyOverview {
+  measured_date: string | null;
+  weight_kg: number | null;
+  weight_trend_7d_kg: number | null;
+  body_fat_pct: number | null;
+  body_water_kg: number | null;
+  body_water_pct: number | null;
+  hydration_status: string | null;
+  bone_mass_kg: number | null;
+  muscle_mass_kg: number | null;
+  fat_mass_kg: number | null;
+  fat_free_mass_kg: number | null;
+  ffmi: number | null;
+  ffmi_classification: string | null;
+  muscle_fat_ratio: number | null;
+  bmr_kcal: number | null;
+  height_cm: number | null;
+  target_weight_kg: number | null;
+  target_body_fat_pct: number | null;
+  weight_vs_avg_pct: number | null;
+  days_until_next_race: number | null;
+  running_power_to_weight: number | null;
+  cycling_power_to_weight: number | null;
+  running_ftp_watts: number | null;
+  cycling_ftp_watts: number | null;
+  vo2max_running: number | null;
+  vo2max_cycling: number | null;
+}
+
+export function fetchBodyOverview(): Promise<BodyOverview> {
+  return fetch("/api/body/overview").then((res) => handle<BodyOverview>(res));
+}
+
+export interface BodyTrendPoint {
+  date: string;
+  weight_kg: number | null;
+  weight_rolling_avg_kg: number | null;
+  body_fat_pct: number | null;
+  body_water_kg: number | null;
+  bone_mass_kg: number | null;
+  muscle_mass_kg: number | null;
+  fat_mass_kg: number | null;
+}
+
+export interface MuscleSorenessPoint {
+  date: string;
+  muscle_soreness: number;
+}
+
+export interface TrainingLoadPoint {
+  date: string;
+  training_load: number | null;
+}
+
+export interface BodyTrend {
+  points: BodyTrendPoint[];
+  muscle_soreness_points: MuscleSorenessPoint[];
+  training_load_points: TrainingLoadPoint[];
+}
+
+export function fetchBodyTrend(days = 90): Promise<BodyTrend> {
+  return fetch(`/api/body/trend?days=${days}`).then((res) => handle<BodyTrend>(res));
+}
+
+// Gemini-Einordnung des 90-Tage-Trends (siehe body_trend_insight.py) - gleiches Muster wie
+// fetchSleepTrendInsight.
+export interface BodyTrendInsight {
+  date: string;
+  insight_text: string;
+  generated_at: string;
+}
+
+export function fetchBodyTrendInsight(): Promise<BodyTrendInsight> {
+  return fetch("/api/body/trend-insight").then((res) => handle<BodyTrendInsight>(res));
+}
+
+// Lauf-Zeit-Prognose skaliert direkt proportional zum Gewichtsverhältnis (new_time = current_time
+// * target_weight/current_weight) - dieselbe Annahme wie bei vo2max_running_target (konstante
+// absolute VO2max-Kapazität, siehe body_composition.py::compute_what_if).
+export interface RaceTimeProjectionEntry {
+  current_seconds: number;
+  target_seconds: number;
+}
+
+export interface WhatIfResult {
+  current_weight_kg: number | null;
+  target_weight_kg: number;
+  cycling_ftp_watts: number | null;
+  cycling_power_to_weight_current: number | null;
+  cycling_power_to_weight_target: number | null;
+  vo2max_running_current: number | null;
+  vo2max_running_target: number | null;
+  race_time_projection: Record<string, RaceTimeProjectionEntry> | null;
+}
+
+export function fetchBodyWhatIf(targetWeightKg: number): Promise<WhatIfResult> {
+  return fetch(`/api/body/what-if?target_weight_kg=${targetWeightKg}`).then((res) => handle<WhatIfResult>(res));
+}
+
+// height_source unterscheidet, ob die Körpergröße automatisch aus Garmins Profil kommt
+// ("garmin", täglich aktualisiert) oder unter Einstellungen manuell überschrieben wurde
+// ("manual", wird von künftigen Garmin-Syncs nicht mehr überschrieben - siehe
+// body_composition.py::sync_height_from_garmin).
+export interface BodySettings {
+  height_cm: number | null;
+  height_source: string | null;
+  target_weight_kg: number | null;
+  target_body_fat_pct: number | null;
+}
+
+export interface BodySettingsUpdate {
+  height_cm?: number | null;
+  target_weight_kg?: number | null;
+  target_body_fat_pct?: number | null;
+  reset_height_to_garmin?: boolean;
+}
+
+export function fetchBodySettings(): Promise<BodySettings> {
+  return fetch("/api/body/settings").then((res) => handle<BodySettings>(res));
+}
+
+export function saveBodySettings(update: BodySettingsUpdate): Promise<BodySettings> {
+  return fetch("/api/body/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(update),
+  }).then((res) => handle<BodySettings>(res));
+}
+
+export function resetHeightToGarmin(): Promise<BodySettings> {
+  return saveBodySettings({ reset_height_to_garmin: true });
+}
+
+// resolved_at === null markiert einen noch aktiven Eintrag ("aktive Baustelle").
+export interface Injury {
+  id: number;
+  date: string;
+  body_part: string;
+  severity: number;
+  pain_type: string | null;
+  context: string | null;
+  notes: string | null;
+  resolved_at: string | null;
+  created_at: string;
+}
+
+export interface InjuryInput {
+  date: string;
+  body_part: string;
+  severity: number;
+  pain_type: string | null;
+  context: string | null;
+  notes: string | null;
+}
+
+export interface InjuryUpdateInput {
+  body_part?: string | null;
+  severity?: number | null;
+  pain_type?: string | null;
+  context?: string | null;
+  notes?: string | null;
+  resolved?: boolean | null;
+}
+
+export function fetchInjuries(activeOnly = false): Promise<Injury[]> {
+  return fetch(`/api/body/injuries?active_only=${activeOnly}`).then((res) => handle<Injury[]>(res));
+}
+
+export function createInjury(input: InjuryInput): Promise<Injury> {
+  return fetch("/api/body/injuries", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }).then((res) => handle<Injury>(res));
+}
+
+export function updateInjury(id: number, input: InjuryUpdateInput): Promise<Injury> {
+  return fetch(`/api/body/injuries/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }).then((res) => handle<Injury>(res));
+}
+
+export function deleteInjury(id: number): Promise<{ success: boolean }> {
+  return fetch(`/api/body/injuries/${id}`, { method: "DELETE" }).then((res) => handle<{ success: boolean }>(res));
+}

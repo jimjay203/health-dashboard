@@ -8,6 +8,7 @@ from db import save_garmin_data, upsert_daily_metric, replace_timeseries, upsert
 from training_zones import recompute_zones
 from daily_summary import compute_daily_summary
 from weekly_summary import compute_weekly_summary
+import body_composition
 
 
 def _epoch_ms_local_to_iso(epoch_ms):
@@ -613,6 +614,16 @@ def _fetch_body_composition(client, target_date):
                 "time_half_marathon": race_predictions.get("timeHalfMarathon"),
                 "time_marathon": race_predictions.get("timeMarathon"),
             })
+
+        # Körper-Seite (siehe body_composition.py): Körpergröße für den FFMI, bisher ungenutzt in
+        # Garmins eigenem Profil-Endpunkt gefunden (ground-truth: garmin_api_exploration/
+        # get_user_profile.json -> userData.height). Kein Datum-Parameter, immer Garmins aktueller
+        # Profilwert - genau wie get_race_predictions oben nur für "heute" abrufen.
+        user_profile = _safe_call(client, "get_user_profile", lambda c: c.get_user_profile())
+        if user_profile:
+            height_cm = (user_profile.get("userData") or {}).get("height")
+            if height_cm is not None:
+                body_composition.sync_height_from_garmin(height_cm)
 
 
 def _add_months(year, month, offset):

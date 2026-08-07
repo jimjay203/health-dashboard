@@ -331,6 +331,13 @@ def init_db():
             insight_text TEXT,
             generated_at TIMESTAMP
         """,
+        # Körper-Seite, "Trend (90 Tage)"-Sektion (siehe body_trend_insight.py) - gleiches Muster
+        # wie sleep_trend_insight, für die Gewichts-/Körperzusammensetzungs-Charts.
+        "body_trend_insight": """
+            date TEXT PRIMARY KEY,
+            insight_text TEXT,
+            generated_at TIMESTAMP
+        """,
         # Rolling-Horizon-Wochenplaner (siehe weekly_planner.py) - PK date statt week_id, da
         # Heute-Ansicht/daily_recommendation.py immer "was ist heute geplant" abfragen (ein
         # SELECT...WHERE date=? statt Wochen-Lookup+Tag-Extraktion). week_id bleibt als Spalte für
@@ -973,6 +980,47 @@ def init_db():
     """)
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_withings_weigh_ins_date ON withings_weigh_ins(date)"
+    )
+
+    # Körper-Seite (siehe body_composition.py): zwei feste, vom Nutzer selbst gepflegte
+    # Personenwerte statt eines eigenen Nutzerprofil-Konstrukts - Körpergröße (für FFMI) und
+    # Zielgewicht (für den What-if-Simulator). Generischer key/value-Aufbau (statt fester Spalten),
+    # da beide Werte dieselbe einfache "ein Zahlenwert, jederzeit überschreibbar"-Semantik haben.
+    # source unterscheidet bei height_cm zwischen 'garmin' (täglich automatisch aus
+    # get_user_profile() übernommen, siehe garmin_service.py::_fetch_body_composition) und 'manual'
+    # (unter Einstellungen überschrieben - ein Garmin-Sync überschreibt einen manuellen Wert dann
+    # NICHT mehr, siehe body_composition.py::sync_height_from_garmin). Bei target_weight_kg bleibt
+    # source ungenutzt (NULL) - das Zielgewicht hat keine Garmin-Quelle.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS body_settings (
+        key TEXT PRIMARY KEY,
+        value REAL,
+        source TEXT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    existing_columns = {row[1] for row in cursor.execute("PRAGMA table_info(body_settings)")}
+    if "source" not in existing_columns:
+        cursor.execute("ALTER TABLE body_settings ADD COLUMN source TEXT")
+
+    # Körper-Seite: Schmerz-/Verletzungsprotokoll. AUTOINCREMENT-id statt date-PK, da an einem Tag
+    # mehrere Beschwerden an unterschiedlichen Körperstellen protokolliert werden können.
+    # resolved_at (NULL = noch aktiv) trägt die "aktive Baustellen"-Badges auf der Körper-Seite.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS injury_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL,
+        body_part TEXT NOT NULL,
+        severity INTEGER NOT NULL,
+        pain_type TEXT,
+        context TEXT,
+        notes TEXT,
+        resolved_at TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_injury_log_date ON injury_log(date)"
     )
 
     # Leistungsziele (siehe "Leistung"-Seite/performance.py) - bewusst zwei getrennte Tabellen

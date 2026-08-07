@@ -577,10 +577,10 @@ function bedtimeBadge(
   }
   if (actual < start) {
     const deltaMinutes = Math.round((start - actual) * 60);
-    return { text: `Bettzeit: ${deltaMinutes} Min früher als empfohlen`, met: true };
+    return { text: `Bettzeit: ${deltaMinutes} Min früher als empf.`, met: true };
   }
   const deltaMinutes = Math.round((actual - end) * 60);
-  return { text: `Bettzeit: ${deltaMinutes} Min später als empfohlen`, met: false };
+  return { text: `Bettzeit: ${deltaMinutes} Min später als empf.`, met: false };
 }
 
 function SleepRegularityChart({ points }: { points: SleepTrendPoint[] }) {

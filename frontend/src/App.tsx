@@ -6,9 +6,11 @@ import TodayView from "./TodayView";
 import WeekView from "./WeekView";
 import PerformanceView from "./PerformanceView";
 import SleepView from "./SleepView";
+import BodyView from "./BodyView";
 import InsightMemoryView from "./InsightMemoryView";
 import ClubSlotsSettings from "./ClubSlotsSettings";
 import PerformanceGoalsSettings from "./PerformanceGoalsSettings";
+import BodyMeasurementsSettings from "./BodyMeasurementsSettings";
 import DataSyncSettings from "./DataSyncSettings";
 import { useTheme } from "./theme";
 import { useSidebarCollapsed } from "./sidebarCollapsed";
@@ -18,6 +20,7 @@ function SettingsView() {
     <div className="today-view">
       <ClubSlotsSettings />
       <PerformanceGoalsSettings />
+      <BodyMeasurementsSettings />
       <DataSyncSettings />
     </div>
   );
@@ -49,6 +52,7 @@ function App() {
           {view === "week" && <WeekView />}
           {view === "performance" && <PerformanceView />}
           {view === "sleep" && <SleepView />}
+          {view === "body" && <BodyView />}
           {view === "insights" && <InsightMemoryView />}
           {view === "settings" && <SettingsView />}
         </div>

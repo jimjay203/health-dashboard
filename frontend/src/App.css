@@ -1210,8 +1210,12 @@ button.journal-status-pill {
   margin-bottom: 12px;
 }
 
+/* Feste Breite statt reinem Content-Fit, geteilt mit .sleep-gauge-col (Sleep-Score-Gauge, siehe
+   SleepView.tsx) - dort gibt die Status-Pillen-Breite darunter den natürlichen Platzbedarf vor,
+   hier übernommen (plus etwas Luft) und für beide Gauge-Spalten vereinheitlicht. */
 .readiness-card-gauge-col {
   flex: 0 0 auto;
+  width: 250px;
 }
 
 /* 2 Spalten x 3 Zeilen (siehe TodayView.tsx für die Paar-Reihenfolge) statt einer langen Liste -
@@ -1746,8 +1750,11 @@ button.journal-status-pill {
   align-items: flex-start;
 }
 
+/* Feste Breite statt reinem Content-Fit (siehe .readiness-card-gauge-col-Kommentar) - dieselbe
+   Breite wie die Trainingsbereitschafts-Gauge, damit beide Gauge-Spalten gleich breit sind. */
 .sleep-gauge-col {
   flex: 0 0 auto;
+  width: 250px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1916,8 +1923,11 @@ button.journal-status-pill {
 }
 
 /* .hrv-trend-panel bleibt sonst unverändert (siehe HrvTrendPanel.tsx/Leistung-Seite) - hier nur
-   innerhalb von .sleep-trend-row als Flex-Item mit mehr Breite als die Insight-Spalte. */
-.sleep-trend-row .hrv-trend-panel {
+   innerhalb von .sleep-trend-row als Flex-Item mit mehr Breite als die Insight-Spalte. Gleiche
+   Regel für .body-trend-grid (Körper-Seite, BodyView.tsx), das dieselbe .sleep-trend-row-Zeile
+   wiederverwendet. */
+.sleep-trend-row .hrv-trend-panel,
+.sleep-trend-row .body-trend-grid {
   flex: 2 1 auto;
   min-width: 0;
   margin-top: 0;
@@ -2177,7 +2187,8 @@ button.journal-status-pill {
   }
 
   .performance-row,
-  .readiness-card-top {
+  .readiness-card-top,
+  .body-injury-form-row {
     flex-direction: column;
   }
 
@@ -2186,7 +2197,8 @@ button.journal-status-pill {
     flex-direction: column;
   }
 
-  .sleep-correlations-grid {
+  .sleep-correlations-grid,
+  .body-trend-grid {
     grid-template-columns: 1fr;
   }
 
@@ -2195,4 +2207,188 @@ button.journal-status-pill {
     overflow-x: auto;
     white-space: nowrap;
   }
+}
+
+/* --- Körper-Seite (BodyView.tsx) --- */
+
+.body-half-col {
+  flex: 1 1 420px;
+  min-width: 0;
+  display: flex;
+}
+
+.body-half-col .card {
+  width: 100%;
+}
+
+/* Trend (90 Tage) - 2x2-Raster statt gestapelter Small-Multiples (siehe .sleep-correlations-grid
+   für dasselbe Muster auf der Schlaf-Seite). */
+.body-trend-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+
+/* Körperzusammensetzung-Karte, 4 Sektionen (siehe BodyOverviewCard, BodyView.tsx). */
+
+.body-hero-row {
+  display: flex;
+  gap: 32px;
+  flex-wrap: wrap;
+  margin: 14px 0;
+}
+
+.body-hero-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.body-hero-sub {
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.body-diagnostic-sub {
+  font-size: var(--text-2xs);
+  color: var(--text);
+  margin-top: 2px;
+}
+
+.body-ffmi-badge {
+  display: inline-block;
+  margin-top: 6px;
+}
+
+/* Trennlinie zwischen den 4 Sektionen kommt jetzt von .performance-subsection (Subsection-
+   Komponente, gleiches Muster wie die Sportart-Karten auf der Leistung-Seite) - hier nur noch die
+   Zentrierung für "Performance-Bezug" on top von .performance-diagnostics-row. */
+.body-performance-row {
+  justify-content: center;
+}
+
+.body-diagnostics-row {
+  margin-top: 4px;
+}
+
+.body-height-form,
+.body-what-if-input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.body-height-form label,
+.body-what-if-input-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.body-height-form input,
+.body-what-if-input-row input {
+  font: inherit;
+  color: var(--text-h);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+  width: 100px;
+}
+
+.body-race-projection {
+  margin-top: 16px;
+}
+
+.body-active-injuries-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 10px 0 16px;
+}
+
+.body-injury-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.body-injury-resolve-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin-left: 2px;
+  cursor: pointer;
+  color: inherit;
+  font-size: inherit;
+}
+
+.body-injury-form {
+  margin-top: 16px;
+}
+
+.body-injury-form-row {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.body-injury-form-fields {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.body-injury-form-diagram {
+  flex: 0 0 auto;
+}
+
+/* Interaktiver 2D-Körper-Dummy (BodyDiagram.tsx) - Pfaddaten haben einen sehr hohen
+   Koordinatenraum (724x1448 je Ansicht), daher hier bewusst schmal gedeckelt statt die volle
+   Formularbreite einzunehmen. */
+.body-diagram {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.body-diagram-toggle {
+  display: flex;
+  gap: 6px;
+}
+
+.body-diagram-toggle button {
+  font: inherit;
+  font-size: var(--text-xs);
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.body-diagram-toggle button.active {
+  background: var(--accent-bg);
+  color: var(--accent);
+  border-color: var(--accent-border);
+}
+
+.body-diagram-svg {
+  width: 100%;
+  max-width: 300px;
+  height: auto;
+}
+
+.body-diagram-region {
+  cursor: pointer;
+  transition: fill-opacity 0.15s ease;
 }
