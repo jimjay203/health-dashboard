@@ -21,7 +21,9 @@ from garmin_auth import get_garmin_client
 from garmin_service import fetch_and_store_garmin_data
 from garmin_backfill import run_backfill
 from garmin_activities import sync_activity_list, sync_activity_details
-from withings_service import fetch_and_store_withings_data
+from withings_service import fetch_and_store_withings_data, fetch_full_withings_history
+from withings_auth import get_token_status
+from withings_auto_sync import get_status as get_withings_auto_sync_status
 
 router = APIRouter(prefix="/api/data-sync", tags=["data-sync"])
 
@@ -61,6 +63,45 @@ async def sync_withings_day(date_str: str) -> DaySyncResponse:
         return DaySyncResponse(success=True, measurement_count=count)
     except Exception as e:
         return DaySyncResponse(success=False, error=str(e))
+
+
+@router.post("/withings-full-history", response_model=DaySyncResponse)
+async def sync_withings_full_history() -> DaySyncResponse:
+    """Einmaliger Voll-Import der kompletten Withings-Historie (siehe
+    withings_service.py::fetch_full_withings_history) - bewusst blockierend statt Hintergrund-Task
+    wie Backfill unten: Withings liefert die ganze Historie über wenige paginierte Aufrufe (kein
+    day-by-day-Loop mit Drosselungspausen wie bei Garmin nötig), das passt in ein normales
+    Request-Timeout."""
+    try:
+        count = await asyncio.to_thread(fetch_full_withings_history)
+        return DaySyncResponse(success=True, measurement_count=count)
+    except Exception as e:
+        return DaySyncResponse(success=False, error=str(e))
+
+
+class WithingsAutoSyncStatusResponse(BaseModel):
+    last_run_at: str | None = None
+    last_success_at: str | None = None
+    last_error: str | None = None
+    last_measurement_count: int | None = None
+    token_created_at: int | None = None
+    token_expires_at: int | None = None
+
+
+@router.get("/withings-auto-sync-status", response_model=WithingsAutoSyncStatusResponse)
+def get_withings_auto_sync_status_route() -> WithingsAutoSyncStatusResponse:
+    """Status des stündlichen Hintergrund-Tasks (siehe withings_auto_sync.py) - hält primär den
+    OAuth2-Token aktiv (Root-Cause des Vorfalls vom 2026-08-07: ein über 52h nie genutzter
+    Refresh-Token wurde beim fälligen Refresh ungültig), synct nebenbei den heutigen Tag.
+    token_status kommt bewusst über get_token_status() (kein Refresh-Seiteneffekt) statt
+    get_withings_tokens()."""
+    status = get_withings_auto_sync_status()
+    token_status = get_token_status() or {}
+    return WithingsAutoSyncStatusResponse(
+        **status,
+        token_created_at=token_status.get("created_at"),
+        token_expires_at=token_status.get("expires_at"),
+    )
 
 
 # --- Backfill über einen Zeitraum (Hintergrund-Task + Status-Polling) ---

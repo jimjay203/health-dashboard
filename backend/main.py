@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from routers import daily_summary, sync_status, today, club_slots, weekly_plan, performance, insight_memory, \
     sleep, habit_tracker, data_sync, body
 from auto_sync import run_daily_auto_sync_forever
+from withings_auto_sync import run_withings_auto_sync_forever
 from db import init_db
 
 
@@ -22,11 +23,15 @@ async def lifespan(app: FastAPI):
     # fehlen neu hinzugekommene Tabellen wie weekly_plan. Eigener init_db()-Aufruf macht die API
     # unabhängig davon.
     init_db()
-    # Automatischer Sync-Trigger (siehe auto_sync.py) - läuft als Hintergrund-Task im selben
-    # Event-Loop, solange der Container lebt. Kein manueller Anstoß nötig.
-    task = asyncio.create_task(run_daily_auto_sync_forever())
+    # Automatische Sync-Trigger - laufen als Hintergrund-Tasks im selben Event-Loop, solange der
+    # Container lebt. Kein manueller Anstoß nötig. Withings separat von Garmin (siehe
+    # auto_sync.py vs. withings_auto_sync.py) - eigener Takt/Zweck (stündlich statt einmal täglich,
+    # hält primär den OAuth2-Token aktiv statt auf ein Verfügbarkeits-Signal zu warten).
+    garmin_task = asyncio.create_task(run_daily_auto_sync_forever())
+    withings_task = asyncio.create_task(run_withings_auto_sync_forever())
     yield
-    task.cancel()
+    garmin_task.cancel()
+    withings_task.cancel()
 
 
 app = FastAPI(title="Health Dashboard API", lifespan=lifespan)

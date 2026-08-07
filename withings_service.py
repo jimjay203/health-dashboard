@@ -6,6 +6,7 @@ Ground-Truth: siehe withings_auth.py-Docstring für den verifizierten API-Vertra
 Endpunkt bewusst wbsapi.withings.net/measure (kein "v2"-Präfix) - exakt der Pfad, den die
 withings-api-Referenzbibliothek für measure_get_meas nutzt, dort real funktionierend verifiziert.
 """
+import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -41,6 +42,34 @@ def _measure_value(measures, measure_type):
         if m["type"] == measure_type:
             return m["value"] * (10 ** m["unit"])
     return None
+
+
+def _store_measure_group(group, local_date):
+    """Extrahiert unsere MEASURE_TYPE_*-Auswahl aus einer einzelnen Withings-Messgruppe und
+    speichert sie - geteilt zwischen fetch_and_store_withings_data (ein Tag) und
+    fetch_full_withings_history (komplette Historie). Gibt True zurück, wenn tatsächlich etwas
+    gespeichert wurde (False bei einer Messgruppe, die nur Typen außerhalb unserer Auswahl enthält,
+    z.B. Herzfrequenz einer Impedanzwaage)."""
+    measures = group.get("measures") or []
+    values = {
+        "weight": _measure_value(measures, MEASURE_TYPE_WEIGHT),
+        "body_fat": _measure_value(measures, MEASURE_TYPE_FAT_RATIO),
+        "body_water": _measure_value(measures, MEASURE_TYPE_HYDRATION),
+        "bone_mass": _measure_value(measures, MEASURE_TYPE_BONE_MASS),
+        "muscle_mass": _measure_value(measures, MEASURE_TYPE_MUSCLE_MASS),
+        "fat_mass_kg": _measure_value(measures, MEASURE_TYPE_FAT_MASS),
+    }
+    if all(v is None for v in values.values()):
+        return False
+
+    upsert_by_key("withings_weigh_ins", "grpid", {
+        "grpid": group["grpid"],
+        "date": local_date,
+        **values,
+        "attrib": ATTRIB_LABELS.get(group.get("attrib"), str(group.get("attrib"))),
+        "timestamp": group["date"],
+    })
+    return True
 
 
 def fetch_and_store_withings_data(target_date):
@@ -81,28 +110,53 @@ def fetch_and_store_withings_data(target_date):
         local_date = datetime.fromtimestamp(group["date"], tz=tz).strftime("%Y-%m-%d")
         if local_date != target_date:
             continue
+        if _store_measure_group(group, local_date):
+            count += 1
 
-        measures = group.get("measures") or []
-        values = {
-            "weight": _measure_value(measures, MEASURE_TYPE_WEIGHT),
-            "body_fat": _measure_value(measures, MEASURE_TYPE_FAT_RATIO),
-            "body_water": _measure_value(measures, MEASURE_TYPE_HYDRATION),
-            "bone_mass": _measure_value(measures, MEASURE_TYPE_BONE_MASS),
-            "muscle_mass": _measure_value(measures, MEASURE_TYPE_MUSCLE_MASS),
-            "fat_mass_kg": _measure_value(measures, MEASURE_TYPE_FAT_MASS),
+    return count
+
+
+def fetch_full_withings_history():
+    """Einmaliger Voll-Import statt des engen Tagesfensters von fetch_and_store_withings_data() -
+    für den initialen Import der kompletten bei Withings vorliegenden Mess-Historie. Kein
+    startdate/enddate (keine Einschränkung des Zeitraums), stattdessen Paginierung über
+    body.more/body.offset (ground-truth: Withings-API-Referenz measure-getmeas sowie die
+    Referenzbibliothek python_withings_api - "more:1 und offset:XX in der Antwort -> offset in den
+    nächsten Aufruf übernehmen, bis more nicht mehr gesetzt ist"). Gibt die Anzahl gespeicherter
+    Messgruppen zurück."""
+    tokens = get_withings_tokens()
+
+    count = 0
+    offset = None
+    while True:
+        params = {
+            "action": "getmeas",
+            "access_token": tokens["access_token"],
+            "category": CATEGORY_REAL,
         }
-        if all(v is None for v in values.values()):
-            # Messgruppe enthält ausschließlich Typen außerhalb unserer MEASURE_TYPE_*-Auswahl
-            # (z.B. Herzfrequenz einer Impedanzwaage) - nichts Sinnvolles zu speichern.
-            continue
+        if offset:
+            params["offset"] = offset
 
-        upsert_by_key("withings_weigh_ins", "grpid", {
-            "grpid": group["grpid"],
-            "date": local_date,
-            **values,
-            "attrib": ATTRIB_LABELS.get(group.get("attrib"), str(group.get("attrib"))),
-            "timestamp": group["date"],
-        })
-        count += 1
+        response = requests.get(MEASURE_URL, params=params, timeout=15)
+        response.raise_for_status()
+        payload = response.json()
+        if payload.get("status") != 0:
+            raise RuntimeError(f"Withings-Messwerte-Abruf fehlgeschlagen (status={payload.get('status')}): {payload}")
+
+        body = payload["body"]
+        tz = ZoneInfo(body.get("timezone") or "UTC")
+        groups = body.get("measuregrps") or []
+
+        for group in groups:
+            local_date = datetime.fromtimestamp(group["date"], tz=tz).strftime("%Y-%m-%d")
+            if _store_measure_group(group, local_date):
+                count += 1
+
+        if not body.get("more"):
+            break
+        offset = body.get("offset")
+        if not offset:
+            break
+        time.sleep(0.5)
 
     return count

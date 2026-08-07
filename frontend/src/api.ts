@@ -689,6 +689,28 @@ export function syncWithingsDay(date: string): Promise<DaySyncResult> {
   return fetch(`/api/data-sync/withings-day/${date}`, { method: "POST" }).then((res) => handle<DaySyncResult>(res));
 }
 
+// Einmaliger Voll-Import der kompletten Withings-Historie (siehe
+// withings_service.py::fetch_full_withings_history) - kein Datum, bewusst blockierend (Withings
+// liefert alles über wenige paginierte Aufrufe, kein Hintergrund-Task wie beim Garmin-Backfill nötig).
+export function syncWithingsFullHistory(): Promise<DaySyncResult> {
+  return fetch("/api/data-sync/withings-full-history", { method: "POST" }).then((res) => handle<DaySyncResult>(res));
+}
+
+// Status des stündlichen Hintergrund-Tasks (siehe withings_auto_sync.py) - hält primär den
+// OAuth2-Token aktiv, synct nebenbei den heutigen Tag.
+export interface WithingsAutoSyncStatus {
+  last_run_at: string | null;
+  last_success_at: string | null;
+  last_error: string | null;
+  last_measurement_count: number | null;
+  token_created_at: number | null;
+  token_expires_at: number | null;
+}
+
+export function fetchWithingsAutoSyncStatus(): Promise<WithingsAutoSyncStatus> {
+  return fetch("/api/data-sync/withings-auto-sync-status").then((res) => handle<WithingsAutoSyncStatus>(res));
+}
+
 export interface BackfillStatus {
   running: boolean;
   current_date: string | null;

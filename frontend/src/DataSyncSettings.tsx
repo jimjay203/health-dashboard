@@ -3,6 +3,8 @@ import {
   todayIso,
   syncGarminDay,
   syncWithingsDay,
+  syncWithingsFullHistory,
+  fetchWithingsAutoSyncStatus,
   startBackfill,
   fetchBackfillStatus,
   fetchActivitiesSummary,
@@ -14,9 +16,71 @@ import {
   type ActivitiesSummary,
   type ActivityRow,
   type ActivityDetailsStatus,
+  type WithingsAutoSyncStatus,
 } from "./api";
 
 const POLL_INTERVAL_MS = 2000;
+// Kein schnelles Polling nötig (kein laufender Fortschritt wie bei Backfill/Aktivitäten-Details) -
+// der Hintergrund-Task selbst läuft stündlich, ein Minuten-Takt reicht, um den Status aktuell zu halten.
+const AUTO_SYNC_STATUS_POLL_MS = 60_000;
+
+function formatDateTime(iso: string | null): string {
+  if (!iso) return "–";
+  return new Date(iso).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "medium" });
+}
+
+function formatUnixSeconds(sec: number | null): string {
+  if (sec == null) return "–";
+  return new Date(sec * 1000).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "medium" });
+}
+
+// Status des stündlichen Hintergrund-Tasks (siehe withings_auto_sync.py) - primärer Zweck ist,
+// den OAuth2-Token aktiv zu halten (Root-Cause des Ausfalls vom 2026-08-07: ein über 52h nie
+// genutzter Refresh-Token wurde beim fälligen Refresh ungültig), synct nebenbei den heutigen Tag.
+function WithingsAutoSyncStatusSection() {
+  const [status, setStatus] = useState<WithingsAutoSyncStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  function reload() {
+    fetchWithingsAutoSyncStatus()
+      .then((s) => {
+        setStatus(s);
+        setError(null);
+      })
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+  }
+
+  useEffect(() => {
+    reload();
+    const interval = setInterval(reload, AUTO_SYNC_STATUS_POLL_MS);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="data-sync-section">
+      <h4>Withings Auto-Sync</h4>
+      <p className="week-rationale">
+        Läuft seit der Automatisierung stündlich im Hintergrund, hält den OAuth2-Token aktiv und
+        synct nebenbei den heutigen Tag - verhindert, dass der Token wie zuvor durch Inaktivität abläuft.
+      </p>
+      {error && <p className="error-banner">{error}</p>}
+      {status && (
+        <>
+          <p className="week-rationale">
+            Letzter Lauf: {formatDateTime(status.last_run_at)}
+            {status.last_success_at && ` · letzter Erfolg: ${formatDateTime(status.last_success_at)}`}
+          </p>
+          <p className="week-rationale">Token gültig bis: {formatUnixSeconds(status.token_expires_at)}</p>
+          {status.last_error ? (
+            <p className="error-banner">{status.last_error}</p>
+          ) : status.last_success_at ? (
+            <p className="data-sync-success">Aktiv, keine Fehler.</p>
+          ) : null}
+        </>
+      )}
+    </div>
+  );
+}
 
 // Einzel-Tages-Sync für ein beliebiges Datum (ergänzt die "Sync jetzt"-Pille in der TopBar, die
 // nur "heute" synct) - Garmin und Withings, gleiches Formular-Muster (Datum + Button).
@@ -348,6 +412,50 @@ function ActivitiesSection() {
   );
 }
 
+// Einmaliger Voll-Import der kompletten Withings-Historie (siehe
+// withings_service.py::fetch_full_withings_history) - kein Datumsfeld wie bei DaySyncSection oben,
+// da Withings ohne startdate/enddate paginiert die gesamte Historie liefert (bewusst blockierend,
+// kein Hintergrund-Task/Polling wie beim Garmin-Backfill nötig - siehe backend/routers/data_sync.py).
+function WithingsFullHistorySection() {
+  const [syncing, setSyncing] = useState(false);
+  const [message, setMessage] = useState<{ text: string; isError: boolean } | null>(null);
+
+  async function handleClick() {
+    setSyncing(true);
+    setMessage(null);
+    try {
+      const result = await syncWithingsFullHistory();
+      if (result.success) {
+        const detail = result.measurement_count != null ? ` (${result.measurement_count} Messung(en))` : "";
+        setMessage({ text: `Erfolgreich synchronisiert${detail}.`, isError: false });
+      } else {
+        setMessage({ text: result.error ?? "Sync fehlgeschlagen.", isError: true });
+      }
+    } catch (e: unknown) {
+      setMessage({ text: e instanceof Error ? e.message : String(e), isError: true });
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  return (
+    <div className="data-sync-section">
+      <h4>Withings Voll-Historie</h4>
+      <p className="week-rationale">
+        Holt einmalig die komplette bei Withings vorliegende Mess-Historie statt nur eines
+        Tagesfensters wie beim Sync oben - sinnvoll direkt nach der ersten Autorisierung, um die
+        volle Historie zu bekommen.
+      </p>
+      <div className="data-sync-form-row">
+        <button type="button" onClick={handleClick} disabled={syncing}>
+          {syncing ? "Synchronisiert…" : "Komplette Historie laden"}
+        </button>
+      </div>
+      {message && <p className={message.isError ? "error-banner" : "data-sync-success"}>{message.text}</p>}
+    </div>
+  );
+}
+
 // Bewusst KEINE Portierung der Streamlit-API-Exploration (Tier-1/2-Testabruf) - das ist ein
 // Debug-/Explorations-Werkzeug, keine Sync-Funktion, und bleibt vorerst nur in Streamlit verfügbar.
 function DataSyncSettings() {
@@ -359,11 +467,13 @@ function DataSyncSettings() {
         caption="Synchronisiert alle Garmin-Kern-/Erweiterungsdaten für ein beliebiges Datum (ergänzt die automatische/tägliche Sync-Pille oben, die nur den heutigen Tag abdeckt)."
         onSync={syncGarminDay}
       />
+      <WithingsAutoSyncStatusSection />
       <DaySyncSection
         title="Withings Sync"
         caption='Holt Waagen-Daten direkt bei Withings statt über Garmins lückenhafte Weiterleitung. Erstmalige Nutzung erfordert eine einmalige Autorisierung über "python3 -m examples.withings_authorize".'
         onSync={syncWithingsDay}
       />
+      <WithingsFullHistorySection />
       <BackfillSection />
       <ActivitiesSection />
     </div>

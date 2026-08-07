@@ -109,6 +109,19 @@ def _load_tokens():
         return json.load(f)
 
 
+def get_token_status():
+    """Liest den gespeicherten Token ohne Refresh-Seiteneffekt (im Gegensatz zu
+    get_withings_tokens()) - für reine Status-Anzeigen (Einstellungen-Seite), die keinen
+    echten API-Call/Refresh auslösen sollen. Gibt None zurück, falls noch nie autorisiert wurde."""
+    tokens = _load_tokens()
+    if tokens is None:
+        return None
+    return {
+        "created_at": tokens["created_at"],
+        "expires_at": tokens["created_at"] + tokens["expires_in"],
+    }
+
+
 def get_withings_tokens():
     """Lädt gespeicherte Tokens, refresht bei Bedarf automatisch (Ergebnis wird sofort persistiert)
     und gibt gültige Tokens zurück."""
