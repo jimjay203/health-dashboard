@@ -763,6 +763,23 @@ export function fetchBackfillStatus(): Promise<BackfillStatus> {
   return fetch(`/api/data-sync/backfill-status`).then((res) => handle<BackfillStatus>(res));
 }
 
+// CTL/ATL/TSB (daily_summary/weekly_summary) für einen Zeitraum neu berechnen - rein lokal, kein
+// Garmin-API-Call (siehe daily_summary.py::recompute_summary_range), deshalb blockierend statt
+// Hintergrund-Task mit Polling wie beim Backfill oben.
+export interface RecomputeSummaryResult {
+  success: boolean;
+  days_recomputed: number;
+  error: string | null;
+}
+
+export function recomputeSummary(startDate: string, endDate: string): Promise<RecomputeSummaryResult> {
+  return fetch(`/api/data-sync/recompute-summary`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ start_date: startDate, end_date: endDate }),
+  }).then((res) => handle<RecomputeSummaryResult>(res));
+}
+
 export interface ActivitiesSummary {
   total_activities: number;
   pending_details: number;

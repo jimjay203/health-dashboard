@@ -306,6 +306,33 @@ def compute_daily_summary(target_date):
     })
 
 
+def recompute_summary_range(start_date, end_date):
+    """Berechnet daily_summary/weekly_summary für jeden Tag zwischen start_date und end_date
+    (inklusive) neu, in chronologischer Reihenfolge. Notwendig, weil CTL/ATL rekursiv vom Vortag
+    abhängen (siehe _previous_ctl_atl) - wird nachträglich z.B. eine Aktivität für ein vergangenes
+    Datum nachgeladen (garmin_activities.py, löst selbst KEINEN compute_daily_summary()-Aufruf aus,
+    anders als garmin_service.fetch_and_store_garmin_data()), bleibt die gesamte CTL/ATL-Kette ab
+    diesem Tag sonst auf dem alten Stand stehen. Rein lokal, kein Garmin-API-Call (im Gegensatz zum
+    "Backfill über Zeitraum" auf der Einstellungen-Seite, garmin_backfill.py::run_backfill) - läuft
+    deshalb ohne Drosselungspausen/Rate-Limit-Risiko durch. Gibt die Anzahl neu berechneter Tage
+    zurück."""
+    from weekly_summary import compute_weekly_summary
+
+    current = date.fromisoformat(start_date)
+    end = date.fromisoformat(end_date)
+    if current > end:
+        raise ValueError("Startdatum muss vor oder gleich dem Enddatum liegen.")
+
+    count = 0
+    while current <= end:
+        target_date = current.isoformat()
+        compute_daily_summary(target_date)
+        compute_weekly_summary(target_date)
+        count += 1
+        current += timedelta(days=1)
+    return count
+
+
 def sync_journal_columns(target_date, rpe, soreness, energy):
     """Wird beim Speichern des Tagesjournals aufgerufen (siehe pages/1_🏠_Home.py) - eigenständiger
     zweiter Trigger neben compute_daily_summary(). Aktualisiert NUR die drei Journal-Spiegel-

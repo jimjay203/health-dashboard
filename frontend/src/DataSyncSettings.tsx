@@ -7,6 +7,7 @@ import {
   fetchWithingsAutoSyncStatus,
   startBackfill,
   fetchBackfillStatus,
+  recomputeSummary,
   fetchActivitiesSummary,
   fetchActivities,
   syncActivitiesList,
@@ -216,6 +217,61 @@ function BackfillSection() {
           {status.last_error && <p className="error-banner">{status.last_error}</p>}
         </div>
       )}
+    </div>
+  );
+}
+
+// CTL/ATL/TSB für einen Zeitraum neu berechnen - nötig nach nachträglichem Aktivitäten-Nachladen
+// (siehe ActivitiesSection unten), das selbst keine Neuberechnung auslöst (rekursive CTL/ATL-Kette,
+// siehe daily_summary.py::recompute_summary_range). Rein lokal, deshalb kein Progress-Polling wie
+// bei BackfillSection nötig - läuft in Sekunden durch.
+function RecomputeSummarySection() {
+  const [start, setStart] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 90);
+    return d.toISOString().slice(0, 10);
+  });
+  const [end, setEnd] = useState(todayIso());
+  const [running, setRunning] = useState(false);
+  const [message, setMessage] = useState<{ text: string; isError: boolean } | null>(null);
+
+  async function handleClick() {
+    if (start > end) {
+      setMessage({ text: "Das Startdatum muss vor oder gleich dem Enddatum liegen.", isError: true });
+      return;
+    }
+    setRunning(true);
+    setMessage(null);
+    try {
+      const result = await recomputeSummary(start, end);
+      if (result.success) {
+        setMessage({ text: `${result.days_recomputed} Tage neu berechnet.`, isError: false });
+      } else {
+        setMessage({ text: result.error ?? "Neuberechnung fehlgeschlagen.", isError: true });
+      }
+    } catch (e: unknown) {
+      setMessage({ text: e instanceof Error ? e.message : String(e), isError: true });
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <div className="data-sync-section">
+      <h4>CTL/ATL/TSB neu berechnen</h4>
+      <p className="week-rationale">
+        Rechnet die Trainingszustand-Kennzahlen für jeden Tag im Zeitraum neu (chronologisch, da CTL/ATL vom Vortag
+        abhängen) - z.B. nötig, nachdem nachträglich Aktivitäten nachgeladen wurden. Rein lokal, kein Garmin-Zugriff.
+      </p>
+      <div className="data-sync-form-row">
+        <input type="date" value={start} onChange={(e) => setStart(e.target.value)} disabled={running} />
+        <span>bis</span>
+        <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} disabled={running} />
+        <button type="button" onClick={handleClick} disabled={running}>
+          {running ? "Berechnet…" : "Neu berechnen"}
+        </button>
+      </div>
+      {message && <p className={message.isError ? "error-banner" : "data-sync-success"}>{message.text}</p>}
     </div>
   );
 }
@@ -477,6 +533,7 @@ function DataSyncSettings() {
       <WithingsFullHistorySection />
       <BackfillSection />
       <ActivitiesSection />
+      <RecomputeSummarySection />
     </div>
   );
 }

@@ -24,6 +24,7 @@ from garmin_activities import sync_activity_list, sync_activity_details
 from withings_service import fetch_and_store_withings_data, fetch_full_withings_history
 from withings_auth import get_token_status
 from withings_auto_sync import get_status as get_withings_auto_sync_status
+from daily_summary import recompute_summary_range
 
 router = APIRouter(prefix="/api/data-sync", tags=["data-sync"])
 
@@ -183,6 +184,35 @@ class BackfillStatusResponse(BaseModel):
 @router.get("/backfill-status", response_model=BackfillStatusResponse)
 def get_backfill_status() -> BackfillStatusResponse:
     return BackfillStatusResponse(**_backfill_state)
+
+
+# --- CTL/ATL/TSB (daily_summary/weekly_summary) für einen Zeitraum neu berechnen - rein lokal,
+# kein Garmin-API-Call (siehe daily_summary.py::recompute_summary_range). Braucht man z.B. nach
+# nachträglichem Aktivitäten-Nachladen (siehe Aktivitäten-Sektion unten) - das löst selbst keinen
+# compute_daily_summary()-Aufruf aus, die CTL/ATL-Kette bliebe sonst auf altem Stand stehen. Anders
+# als Backfill oben bewusst blockierend statt Hintergrund-Task - keine Drosselungspausen nötig,
+# eine Neuberechnung über Monate dauert nur Sekunden.
+
+class RecomputeSummaryRequest(BaseModel):
+    start_date: str
+    end_date: str
+
+
+class RecomputeSummaryResponse(BaseModel):
+    success: bool
+    days_recomputed: int = 0
+    error: str | None = None
+
+
+@router.post("/recompute-summary", response_model=RecomputeSummaryResponse)
+async def recompute_summary(body: RecomputeSummaryRequest) -> RecomputeSummaryResponse:
+    _validate_date(body.start_date)
+    _validate_date(body.end_date)
+    try:
+        count = await asyncio.to_thread(recompute_summary_range, body.start_date, body.end_date)
+        return RecomputeSummaryResponse(success=True, days_recomputed=count)
+    except Exception as e:
+        return RecomputeSummaryResponse(success=False, error=str(e))
 
 
 # --- Aktivitäten (Liste + Detail-Zeitreihen) ---
