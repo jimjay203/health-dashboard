@@ -21,6 +21,26 @@ const RHR_NORMAL_COLOR = "#f5a623";
 // Wert markiert dort den Pillen-Text, hier die "Alert"-Punkte im Abweichungs-Chart.
 const RHR_ALERT_THRESHOLD = 3;
 
+// Chart.js reserviert für die y-Achsen-Beschriftung standardmäßig genau so viel Breite, wie das
+// jeweils breiteste Tick-Label ("100 ms" vs. "-5 bpm" vs. "400") braucht - dadurch verschiebt sich
+// die eigentliche Plot-Fläche zwischen den drei gestapelten Charts, obwohl sie dieselbe Zeitachse
+// teilen sollen. afterFit erzwingt in allen drei Charts dieselbe feste Breite, unabhängig vom
+// tatsächlichen Label-Text, damit x-Achse/Datenpunkte exakt untereinander stehen.
+const Y_AXIS_WIDTH_PX = 42;
+
+function fixedYAxisWidth(scale: { width: number }) {
+  scale.width = Y_AXIS_WIDTH_PX;
+}
+
+// Chart.js setzt "offset" (Kategorie-Band mit Rand-Puffer, Balken/Punkte sitzen in der Mitte des
+// Bands statt direkt auf der Tick-Position) bei Bar-Charts standardmäßig auf true, bei Line-Charts
+// auf false - dieselben Datums-Labels landen dadurch an leicht unterschiedlichen x-Positionen.
+// Explizit auf allen drei Charts gleich gesetzt (true statt false), damit Linienpunkte und Balken
+// exakt übereinander liegen UND der Rand-Puffer bleibt - ohne ihn würden die äußeren Balken an
+// beiden Enden nur noch zur Hälfte sichtbar sein (ihr Zentrum säße dann exakt auf der Kanten-Tick-
+// Position).
+const X_AXIS_OFFSET = true;
+
 function HrvBaselineChart({
   trend,
   baselineLow,
@@ -97,8 +117,9 @@ function HrvBaselineChart({
             maintainAspectRatio: false,
             animation: false,
             scales: {
-              x: { display: false },
+              x: { display: false, offset: X_AXIS_OFFSET },
               y: {
+                afterFit: fixedYAxisWidth,
                 grid: { color: gridColor },
                 ticks: { color: textColor, font: { size: 10 }, maxTicksLimit: 4, callback: (v) => `${v} ms` },
               },
@@ -154,8 +175,9 @@ function RestingHrDeviationChart({ trend }: { trend: HrvTrendPoint[] }) {
             maintainAspectRatio: false,
             animation: false,
             scales: {
-              x: { display: false },
+              x: { display: false, offset: X_AXIS_OFFSET },
               y: {
+                afterFit: fixedYAxisWidth,
                 grid: { color: gridColor },
                 ticks: { color: textColor, font: { size: 10 }, maxTicksLimit: 4, callback: (v) => `${v} bpm` },
               },
@@ -212,10 +234,12 @@ function TrainingLoadChart({ trend }: { trend: HrvTrendPoint[] }) {
             animation: false,
             scales: {
               x: {
+                offset: X_AXIS_OFFSET,
                 grid: { display: false },
                 ticks: { color: textColor, font: { size: 10 }, maxTicksLimit: 7, autoSkip: true },
               },
               y: {
+                afterFit: fixedYAxisWidth,
                 grid: { color: gridColor },
                 ticks: { color: textColor, font: { size: 10 }, maxTicksLimit: 3 },
               },
