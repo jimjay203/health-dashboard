@@ -1725,6 +1725,26 @@ button.journal-status-pill {
   color: #e5484d;
 }
 
+.insight-delete-all-button {
+  float: right;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-sm);
+  font-weight: normal;
+  text-transform: none;
+  letter-spacing: normal;
+  border: none;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  padding: 0;
+}
+
+.insight-delete-all-button:hover {
+  color: #e5484d;
+}
+
 /* --- Schlaf-Seite (SleepView.tsx) --- */
 
 /* Letzte Nacht + Habit-Tracker nebeneinander, 3/4 zu 1/4 (flex-grow-Verhältnis statt fester

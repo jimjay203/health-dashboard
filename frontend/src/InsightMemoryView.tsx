@@ -4,6 +4,7 @@ import {
   fetchInsightMemoryRaw,
   addInsightMemoryEntry,
   deleteInsightMemoryEntry,
+  deleteAllInsightMemoryVersions,
   type InsightMemoryVersion,
   type InsightRawEntry,
   type InsightSource,
@@ -19,14 +20,42 @@ const SOURCE_LABEL: Record<InsightSource, { text: string; icon: string }> = {
 // Aktueller verdichteter Stand + einklappbarer Verlauf älterer Versionen. Rein lesend, keine
 // eigene Bearbeitung - der verdichtete Text entsteht ausschließlich über neue Rohtext-Einträge
 // unten (siehe insight_memory.py::_compress).
-function CompressedTextCard({ versions }: { versions: InsightMemoryVersion[] }) {
+function CompressedTextCard({
+  versions,
+  onDeleteAll,
+}: {
+  versions: InsightMemoryVersion[];
+  onDeleteAll: () => void;
+}) {
   const [showHistory, setShowHistory] = useState(false);
   const latest = versions[0] ?? null;
   const history = versions.slice(1);
 
+  function handleDeleteAll() {
+    if (
+      window.confirm(
+        `Wirklich den kompletten verdichteten Stand löschen (alle ${versions.length} Versionen)? Die Rohtext-Einträge unten bleiben erhalten, der nächste neue Eintrag verdichtet wieder bei "(noch leer)" startend.`
+      )
+    ) {
+      onDeleteAll();
+    }
+  }
+
   return (
     <div className="card">
-      <h3>Aktueller Stand</h3>
+      <h3>
+        Aktueller Stand
+        {versions.length > 0 && (
+          <button
+            type="button"
+            className="insight-delete-all-button"
+            title="Alle Versionen löschen"
+            onClick={handleDeleteAll}
+          >
+            <Icon name="delete" /> Alle Versionen löschen
+          </button>
+        )}
+      </h3>
       {latest ? (
         <>
           <p className="week-rationale">
@@ -180,10 +209,19 @@ function InsightMemoryView() {
     }
   }
 
+  async function handleDeleteAll() {
+    try {
+      await deleteAllInsightMemoryVersions();
+      reload();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   return (
     <div className="today-view">
       {error && <p className="error-banner">Fehler: {error}</p>}
-      <CompressedTextCard versions={versions} />
+      <CompressedTextCard versions={versions} onDeleteAll={handleDeleteAll} />
       <NewEntryCard onAdded={reload} />
       <RawEntriesCard entries={entries} onDelete={handleDelete} />
     </div>

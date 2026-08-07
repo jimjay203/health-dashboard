@@ -350,6 +350,14 @@ export function deleteInsightMemoryEntry(id: number): Promise<{ success: boolean
   );
 }
 
+// Kompletter Reset der verdichteten Historie (alle Versionen) - das Rohtext-Archiv bleibt
+// unangetastet, siehe backend/routers/insight_memory.py.
+export function deleteAllInsightMemoryVersions(): Promise<{ success: boolean }> {
+  return fetch(`/api/insight-memory/compressed`, { method: "DELETE" }).then((res) =>
+    handle<{ success: boolean }>(res)
+  );
+}
+
 export function fetchPerformanceGoals(): Promise<PerformanceGoal[]> {
   return fetch(`/api/performance/goals`).then((res) => handle<PerformanceGoal[]>(res));
 }

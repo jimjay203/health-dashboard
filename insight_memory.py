@@ -143,3 +143,16 @@ def delete_raw_entry(entry_id):
     conn.execute("DELETE FROM insight_memory_raw WHERE id = ?", (entry_id,))
     conn.commit()
     conn.close()
+
+
+def delete_all_compressed_versions():
+    """Löscht die komplette verdichtete Historie (alle Versionen) - kompletter Reset des
+    "Aktueller Stand"-Kontexts, der bei jedem Gemini-Aufruf mitgegeben wird (siehe
+    context_blocks.py::insight_memory_block). insight_memory_raw (das Rohtext-Archiv) bleibt
+    bewusst unangetastet - einzelne Rohtext-Einträge lassen sich weiterhin separat über
+    delete_raw_entry() entfernen, ein neuer Eintrag nach diesem Reset verdichtet einfach wieder bei
+    "(noch leer)" startend."""
+    conn = get_connection()
+    conn.execute("DELETE FROM insight_memory_compressed")
+    conn.commit()
+    conn.close()

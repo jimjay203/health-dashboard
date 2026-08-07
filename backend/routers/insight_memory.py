@@ -67,3 +67,11 @@ def add_raw_entry(body: RawEntryIn) -> CompressedVersion:
 def delete_raw_entry(entry_id: int) -> dict:
     insight_memory.delete_raw_entry(entry_id)
     return {"success": True}
+
+
+@router.delete("/compressed")
+def delete_all_compressed_versions() -> dict:
+    """Kompletter Reset des verdichteten Kontexts (alle Versionen) - siehe
+    insight_memory.py::delete_all_compressed_versions. Das Rohtext-Archiv bleibt unangetastet."""
+    insight_memory.delete_all_compressed_versions()
+    return {"success": True}
