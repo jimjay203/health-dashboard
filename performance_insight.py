@@ -2,7 +2,10 @@
 Gemini-Einschätzung zu den Leistungszielen auf der "Leistung"-Seite (PerformanceView.tsx):
 Erreichbarkeit der hinterlegten Ziele + konkrete Tipps, auf Basis derselben Kennzahlen, die die
 Seite selbst zeigt (Ziele, Trainingszustand/CTL-ATL-TSB, Belastungsfokus, Schwellenwerte,
-Wettkampf-Prognosen, Rad-Wirkungsgrad, Schwimm-Diagnostik). Reine Python-Logik, kein Streamlit-/
+Wettkampf-Prognosen, Rad-Wirkungsgrad, Schwimm-Diagnostik) sowie des geteilten Erkenntnis-
+Gedächtnisses (context_blocks.py::insight_memory_block, siehe insight_memory.py) - dort trägt der
+Athlet Dinge ein, die sich nicht aus den Daten ablesen lassen (Datenlücken, Korrekturen an
+ungenauen Garmin-Schätzungen, Bestzeiten). Reine Python-Logik, kein Streamlit-/
 FastAPI-Import (gleiches Muster wie body_trend_insight.py). Kontext-Werte werden bewusst über
 eigene, schlanke SQL-Abfragen direkt ermittelt statt aus backend/routers/performance.py importiert
 - der Router lebt nur innerhalb der Docker-Flattening-Struktur (siehe backend/Dockerfile), dieses
@@ -17,7 +20,7 @@ from datetime import date, datetime, timedelta
 from google.genai import types
 from db import get_connection, upsert_daily_metric
 from gemini_client import MODEL_NAME, get_client
-from context_blocks import strip_markdown_fences
+from context_blocks import strip_markdown_fences, insight_memory_block
 import performance_goals
 
 RESPONSE_SCHEMA = {
@@ -34,12 +37,17 @@ sollte er konkret tun, um dahin zu kommen?
 Du bekommst bereits BERECHNETE Kennzahlen: die Ziele selbst (Ziel- vs. aktueller Wert, Zieldatum),
 den aktuellen Trainingszustand (CTL/ATL/TSB, akute vs. chronische Belastung, Trend der letzten 90
 Tage), die Belastungsfokus-Verteilung (Anteil niedrig-aerob/hoch-aerob/anaerob der letzten 28 Tage,
-mit dem gängigen 80/20-Polarisierungsrichtwert), Leistungsdiagnostik-Schwellenwerte je Disziplin
-sowie Wettkampf-Prognosen.
+mit dem gängigen 80/20-Polarisierungsrichtwert), Leistungsdiagnostik-Schwellenwerte je Disziplin,
+Wettkampf-Prognosen sowie einen Block "ZUSATZKONTEXT VOM ATHLETEN" mit vom Athleten selbst
+eingetragenen Hintergrundinfos (z.B. Korrekturen an ungenauen Garmin-Schätzungen, Bestzeiten,
+Datenlücken) - diese Infos haben Vorrang vor den berechneten Werten, falls sie sich widersprechen
+(z.B. eine vom Athleten korrigierte Pace-Schätzung statt der rohen Garmin-Prognose).
 
 WICHTIG: Erfinde oder berechne KEINE eigenen Zahlen - nutze ausschließlich die gegebenen Werte. Bei
 fehlenden Daten (kein Ziel gesetzt, kein Zieldatum, keine Diagnostik-Messung) das explizit benennen
-statt eine Einschätzung vorzutäuschen.
+statt eine Einschätzung vorzutäuschen. Beachte den CTL-Trend nur für den Zeitraum, für den laut
+Zusatzkontext tatsächlich durchgängige Garmin-Daten vorliegen - ein Sprung von 0 davor ist meist nur
+ein Datenlücken-Artefakt, keine reale Fitness-Entwicklung.
 
 Gehe wenn möglich auf JEDES hinterlegte Ziel einzeln ein (kurz), ordne dann übergreifend ein, ob der
 aktuelle Trainingszustand/Belastungsfokus die Ziele unterstützt oder eher bremst, und schließe mit
@@ -353,6 +361,8 @@ def _goals_block(target_date, current_values):
 def _gather_context(target_date):
     conn = get_connection()
     try:
+        cursor = conn.cursor()
+        memory_text = insight_memory_block(cursor)
         load_status_text, _ = _load_status_block(conn, target_date)
         load_focus_text = _load_focus_block(conn, target_date)
         thresholds = _thresholds(conn)
@@ -365,6 +375,7 @@ def _gather_context(target_date):
         conn.close()
 
     return "\n".join([
+        f"ZUSATZKONTEXT VOM ATHLETEN: {memory_text}",
         goals_text,
         load_status_text,
         load_focus_text,
