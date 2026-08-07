@@ -5,6 +5,7 @@ import {
   todayIso,
   formatShortDate,
   formatPace,
+  formatSecondsToPace,
   formatGoalValue,
   unitDisplayLabel,
   goalProgressPct,
@@ -252,11 +253,29 @@ function Subsection({ title, children }: { title: string; children: ReactNode })
 }
 
 // Kleiner Diagnostik-Wert innerhalb der Sportart-Karte (kein eigenes .card - Diagnostik-Werte
-// haben keine Zielverfolgung, sind reine Ist-Werte, siehe DiagnosticsRow).
-function DiagnosticItem({ label, value, date }: { label: string; value: string; date?: string | null }) {
+// haben keine Zielverfolgung, sind reine Ist-Werte, siehe DiagnosticsRow). unit separat vom
+// Zahlenwert übergeben statt Teil des value-Strings, damit sie kleiner/nicht-fett dargestellt
+// werden kann (siehe .performance-diagnostic-unit) - als verschachtelter <span> im selben
+// Inline-Textfluss sitzt sie automatisch auf derselben Grundlinie wie die Zahl, ohne dass es
+// dafür ein eigenes Flex-Alignment bräuchte. SWOLF hat bewusst keine Einheit (dimensionslose
+// Kennzahl, keine erfundene Einheit).
+function DiagnosticItem({
+  label,
+  value,
+  unit,
+  date,
+}: {
+  label: string;
+  value: string;
+  unit?: string;
+  date?: string | null;
+}) {
   return (
     <div className="performance-diagnostic-item">
-      <div className="performance-diagnostic-value">{value}</div>
+      <div className="performance-diagnostic-value">
+        {value}
+        {unit && <span className="performance-diagnostic-unit"> {unit}</span>}
+      </div>
       <div className="performance-diagnostic-label">
         {label}
         {date && <span className="performance-diagnostic-date"> · {formatShortDate(date)}</span>}
@@ -289,7 +308,8 @@ function GoalProgressBar({ goal, tooltip }: { goal: PerformanceGoal | undefined;
     <span className={`goal-progress-current${met ? " goal-met" : ""}`}>
       <span className="goal-progress-current-caption">Aktuell:</span>{" "}
       <span className="goal-progress-current-value">
-        {formatGoalValue(goal.current_value, goal.unit)} {unitLabel}
+        {formatGoalValue(goal.current_value, goal.unit)}
+        <span className="goal-progress-unit"> {unitLabel}</span>
       </span>
       {met && <Icon name="check" />}
       {tooltip && <InfoTooltip text={tooltip} />}
@@ -324,15 +344,10 @@ function GoalProgressBar({ goal, tooltip }: { goal: PerformanceGoal | undefined;
       <div className="goal-progress-labels">
         <span>
           {formatGoalValue(goal.start_value, goal.unit)} {unitLabel} · {formatShortDate(goal.start_value_date)}
-          {/* start_value_date weicht von start_date ab, wenn entweder gar kein Startdatum gesetzt
-              ist ODER vor dem gewählten Startdatum schlichtweg noch keine Garmin-Messung existiert
-              (z.B. weil diese Metrik erst seit Kurzem synchronisiert wird) - beides transparent
-              machen, statt eine "leise" Abweichung vom eingegebenen Datum zu zeigen. */}
-          {goal.start_date !== goal.start_value_date && " (früheste verfügbare Messung)"}
         </span>
         <span>
-          {formatGoalValue(goal.target_value, goal.unit)} {unitLabel} ·{" "}
-          {goal.target_date ? formatShortDate(goal.target_date) : "kein Datum"}
+          Ziel: <span className="goal-progress-target-value">{formatGoalValue(goal.target_value, goal.unit)}</span>{" "}
+          {unitLabel} · {goal.target_date ? formatShortDate(goal.target_date) : "kein Datum"}
         </span>
       </div>
     </div>
@@ -450,16 +465,23 @@ function RunPerformanceCard({
           <DiagnosticItem
             label="VO2max"
             value={thresholds?.vo2max_running != null ? `${thresholds.vo2max_running}` : "–"}
+            unit={thresholds?.vo2max_running != null ? "ml/kg/min" : undefined}
             date={thresholds?.vo2max_running_date}
           />
           <DiagnosticItem
             label="Schwellen-HF"
-            value={thresholds?.run_threshold_hr != null ? `${thresholds.run_threshold_hr} bpm` : "–"}
+            value={thresholds?.run_threshold_hr != null ? `${thresholds.run_threshold_hr}` : "–"}
+            unit={thresholds?.run_threshold_hr != null ? "bpm" : undefined}
             date={thresholds?.run_threshold_date}
           />
           <DiagnosticItem
             label="Schwellenpace"
-            value={formatPace(thresholds?.run_threshold_pace_sec_per_km ?? null)}
+            value={
+              thresholds?.run_threshold_pace_sec_per_km != null
+                ? formatSecondsToPace(thresholds.run_threshold_pace_sec_per_km)
+                : "–"
+            }
+            unit={thresholds?.run_threshold_pace_sec_per_km != null ? "min/km" : undefined}
             date={thresholds?.run_threshold_date}
           />
         </div>
@@ -508,18 +530,21 @@ function BikePerformanceCard({
           <DiagnosticItem
             label="VO2max"
             value={thresholds?.vo2max_cycling != null ? `${thresholds.vo2max_cycling}` : "–"}
+            unit={thresholds?.vo2max_cycling != null ? "ml/kg/min" : undefined}
             date={thresholds?.vo2max_cycling_date}
           />
           {/* cycling_threshold_hr stammt aus derselben Garmin-Zeile wie run_threshold_date (siehe
               ThresholdsResponse in backend/routers/performance.py) - kein eigenes Datumsfeld. */}
           <DiagnosticItem
             label="Schwellen-HF"
-            value={thresholds?.cycling_threshold_hr != null ? `${thresholds.cycling_threshold_hr} bpm` : "–"}
+            value={thresholds?.cycling_threshold_hr != null ? `${thresholds.cycling_threshold_hr}` : "–"}
+            unit={thresholds?.cycling_threshold_hr != null ? "bpm" : undefined}
             date={thresholds?.run_threshold_date}
           />
           <DiagnosticItem
             label="FTP Leistung"
-            value={thresholds?.ftp_watts != null ? `${thresholds.ftp_watts} W` : "–"}
+            value={thresholds?.ftp_watts != null ? `${thresholds.ftp_watts}` : "–"}
+            unit={thresholds?.ftp_watts != null ? "W" : undefined}
             date={thresholds?.ftp_date}
           />
         </div>
@@ -554,7 +579,8 @@ function SwimPerformanceCard({ swim, goals }: { swim: SwimDiagnostics | null; go
             />
             <DiagnosticItem
               label="Ø-Pace (Pool)"
-              value={swim?.pace_sec_per_100m != null ? `${formatPace(swim.pace_sec_per_100m).replace("min/km", "min/100m")}` : "–"}
+              value={swim?.pace_sec_per_100m != null ? formatSecondsToPace(swim.pace_sec_per_100m) : "–"}
+              unit={swim?.pace_sec_per_100m != null ? "min/100m" : undefined}
               date={swim?.date}
             />
           </div>

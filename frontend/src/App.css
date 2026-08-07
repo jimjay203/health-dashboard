@@ -1067,7 +1067,7 @@
 }
 
 .performance-subsection-label {
-  font-size: var(--text-2xs);
+  font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -1092,8 +1092,16 @@
   color: var(--text-h);
 }
 
+/* Verschachtelter <span> im selben Textfluss wie der Zahlenwert (siehe PerformanceView.tsx) -
+   sitzt dadurch ohne zusätzliches Alignment automatisch auf derselben Grundlinie. */
+.performance-diagnostic-unit {
+  font-size: var(--text-sm);
+  font-weight: 400;
+  color: var(--text);
+}
+
 .performance-diagnostic-label {
-  font-size: var(--text-xs);
+  font-size: var(--text-2xs);
   color: var(--text);
   margin-top: 2px;
 }
@@ -1365,14 +1373,17 @@
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  font-size: var(--text-base);
+  font-size: var(--text-sm);
   color: var(--text);
   margin-bottom: 8px;
 }
 
 .goal-progress-current {
   display: inline-flex;
-  align-items: center;
+  /* baseline statt center: die deutlich größere/fette Zahl (.goal-progress-current-value) und die
+     kleinere Caption/Check-Icon daneben hatten bei center-Alignment unterschiedliche Grundlinien -
+     die Zahl "hing" sichtbar tiefer als der Rest der Zeile. */
+  align-items: baseline;
   gap: 2px;
   color: var(--text-h);
 }
@@ -1392,6 +1403,14 @@
   font-weight: 700;
   line-height: 1.2;
   color: inherit;
+}
+
+/* Verschachtelter <span> innerhalb von .goal-progress-current-value (siehe PerformanceView.tsx) -
+   sitzt dadurch ohne zusätzliches Alignment automatisch auf derselben Grundlinie wie die Zahl. */
+.goal-progress-unit {
+  font-size: var(--text-sm);
+  font-weight: 400;
+  color: var(--text);
 }
 
 .goal-progress-track {
@@ -1416,6 +1435,10 @@
 
 .goal-progress-labels-single {
   justify-content: flex-start;
+}
+
+.goal-progress-target-value {
+  font-weight: 700;
 }
 
 .info-tooltip {
