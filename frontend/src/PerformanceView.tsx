@@ -200,12 +200,20 @@ const LOAD_FOCUS_TOOLTIP =
   "keine Daten, siehe Ground-Truth-Fund in backend/routers/performance.py.";
 
 // Dieselbe Ampel-Logik wie überall sonst in der App (grün/orange/rot, siehe --accent/HRV-Bereich) -
-// Niedrig-Aerob grün, da das hier die Zielzone ist (Polarisierungs-Ziel ≥70%).
+// Niedrig-Aerob grün, da das hier die Zielzone ist (Polarisierungs-Ziel ≥70%). Nur Niedrig-Aerob
+// bekommt einen Ziel-Strich auf dem Balken - für Hoch-Aerob/Anaerob gibt es keinen verifizierten
+// Schwellenwert im Code (siehe POLARIZATION_MIN_Z1_Z2_PCT-Kommentar oben), deshalb wird dort bewusst
+// keiner erfunden statt eine plausibel wirkende, aber nicht belegte Zahl zu zeigen.
 function LoadFocusBars({ loadStatus }: { loadStatus: LoadStatus | null }) {
-  const bars: { label: string; pct: number | null; colorClass: string }[] = [
+  const bars: { label: string; pct: number | null; colorClass: string; target?: number }[] = [
     { label: "Anaerob", pct: loadStatus?.load_focus_anaerobic_pct ?? null, colorClass: "load-focus-fill-anaerobic" },
     { label: "Hoch-Aerob", pct: loadStatus?.load_focus_high_aerobic_pct ?? null, colorClass: "load-focus-fill-high-aerobic" },
-    { label: "Niedrig-Aerob", pct: loadStatus?.load_focus_low_aerobic_pct ?? null, colorClass: "load-focus-fill-low-aerobic" },
+    {
+      label: "Niedrig-Aerob",
+      pct: loadStatus?.load_focus_low_aerobic_pct ?? null,
+      colorClass: "load-focus-fill-low-aerobic",
+      target: POLARIZATION_MIN_Z1_Z2_PCT,
+    },
   ];
   const hasData = bars.some((b) => b.pct !== null);
 
@@ -226,6 +234,13 @@ function LoadFocusBars({ loadStatus }: { loadStatus: LoadStatus | null }) {
               <span className="load-focus-label">{bar.label}</span>
               <div className="load-focus-track">
                 <div className={`load-focus-fill ${bar.colorClass}`} style={{ width: `${bar.pct ?? 0}%` }} />
+                {bar.target != null && (
+                  <div
+                    className="load-focus-target-marker"
+                    style={{ left: `${bar.target}%` }}
+                    title={`Ziel: ≥${bar.target}%`}
+                  />
+                )}
               </div>
               <span className="load-focus-pct">{(bar.pct ?? 0).toFixed(0)}%</span>
             </div>
