@@ -1361,6 +1361,27 @@ button.journal-status-pill {
   height: 110px;
 }
 
+/* Korrelations-Charts (CorrelationChart.tsx) - Titel + Stärke-Badge in einer Zeile. */
+
+.correlation-chart-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.correlation-badge {
+  flex-shrink: 0;
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: help;
+}
+
 /* Fitness/Ermüdung/Form-Werte-Zeile (CTL/ATL/TSB, Strava-"Fitness & Freshness"-Stil) - große
    Zahl + farbiger Punkt + Beschriftung nebeneinander, kein Kachel-/Kasten-Look. Punktfarben sind
    bewusst fixe Markenfarben (nicht aus den Theme-Tokens), unabhängig von Light/Dark identisch. */

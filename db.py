@@ -535,6 +535,15 @@ def init_db():
         if column not in existing_columns:
             cursor.execute(f"ALTER TABLE daily_summary ADD COLUMN {column} {coltype}")
 
+    # 28-Tage-Ruhepuls-Baseline (existierte bisher nur als 7-Tage-Version, siehe
+    # resting_hr_vs_7d_avg_pct oben) - analog zur bereits vorhandenen hrv_vs_28d_avg_pct-Spalte,
+    # für die neue "Trainingslast am Vorabend vs. Ruhepuls-Abweichung"-Korrelation.
+    daily_summary_rhr_28d_columns = {"resting_hr_vs_28d_avg_pct": "REAL"}
+    existing_columns = {row[1] for row in cursor.execute("PRAGMA table_info(daily_summary)")}
+    for column, coltype in daily_summary_rhr_28d_columns.items():
+        if column not in existing_columns:
+            cursor.execute(f"ALTER TABLE daily_summary ADD COLUMN {column} {coltype}")
+
     # Journal-Spiegel-Spalten: werden NICHT vom Garmin-Sync (compute_daily_summary) geschrieben,
     # sondern eigenständig beim Speichern des Tagesjournals (siehe daily_summary.sync_journal_
     # columns()) - Reihenfolge-unabhängiges Spalten-Gruppen-Upsert, siehe dortiger Kommentar.

@@ -4,6 +4,7 @@ import { Chart as ChartJS, LineElement, BarElement, PointElement, LinearScale, C
 import {
   todayIso,
   formatShortDate,
+  formatPace,
   fetchBodyOverview,
   fetchBodyTrend,
   fetchBodyTrendInsight,
@@ -15,13 +16,16 @@ import {
   fetchInjuries,
   createInjury,
   updateInjury,
+  fetchBodyPerformanceCorrelations,
   type BodyOverview,
   type BodyTrend,
   type BodyTrendInsight,
   type WhatIfResult,
   type Injury,
   type InjuryInput,
+  type PerformanceCorrelations,
 } from "./api";
+import { CorrelationScatter } from "./CorrelationChart";
 import Icon from "./Icon";
 import BodyDiagram from "./BodyDiagram";
 import { fixedYAxisWidth, X_AXIS_OFFSET } from "./HrvTrendPanel";
@@ -820,6 +824,52 @@ function InjuryLogCard({ injuries, onReload }: { injuries: Injury[]; onReload: (
   );
 }
 
+// --- Körper- & Performance-Einfluss (Category-B-Korrelationen) ---
+
+function PerformanceCorrelationsTile({ data }: { data: PerformanceCorrelations | null }) {
+  const accentColor = useCssVar("--accent");
+
+  if (!data) return null;
+
+  const weightVsGa1Points = data.weight_vs_ga1_pace.points
+    .filter((p) => p.weight_avg_kg != null && p.ga1_pace_sec_per_km != null)
+    .map((p) => ({ x: p.weight_avg_kg as number, y: p.ga1_pace_sec_per_km as number }));
+
+  const weeklyLoadVsSeverityPoints = data.weekly_running_load_vs_injury_severity.points.map((p) => ({
+    x: p.running_load,
+    y: p.max_pain_severity,
+  }));
+
+  return (
+    <div className="card">
+      <h3>Körper- & Performance-Einfluss</h3>
+      <div className="sleep-correlations-grid">
+        <CorrelationScatter
+          title="Körpergewicht vs. aerobe Effizienz (GA1-Pace)"
+          tooltip="Jeder Punkt ein Tag mit Gewichtsmessung: x = 7-Tage-Schnitt Körpergewicht, y = Ø-Pace der Läufe im Grundlagenbereich (Friel-Zone 1+2) der letzten 28 Tage. Niedrigere Pace = schneller."
+          points={weightVsGa1Points}
+          xLabel="Gewicht 7d-Schnitt (kg)"
+          yLabel="GA1-Pace"
+          color={accentColor}
+          stats={data.weight_vs_ga1_pace.stats}
+          formatY={formatPace}
+        />
+        <CorrelationScatter
+          title="Wöchentlicher Lauf-Load vs. Schmerz-Intensität"
+          tooltip="Jeder Punkt eine ISO-Woche: x = wöchentliche Trainingslast der Lauf-Aktivitäten, y = maximaler Schmerz-Score (NRS 1-10) aus dem Verletzungsprotokoll dieser Woche (0 = keine Einträge in dieser Woche)."
+          points={weeklyLoadVsSeverityPoints}
+          xLabel="Lauf-Load (Woche)"
+          yLabel="Max. Schmerz-Score (1-10)"
+          yMin={0}
+          yMax={10}
+          color="#38bdf8"
+          stats={data.weekly_running_load_vs_injury_severity.stats}
+        />
+      </div>
+    </div>
+  );
+}
+
 // --- Hauptseite ---
 
 function BodyView() {
@@ -830,6 +880,7 @@ function BodyView() {
   const [targetWeight, setTargetWeight] = useState("");
   const [whatIf, setWhatIf] = useState<WhatIfResult | null>(null);
   const [injuries, setInjuries] = useState<Injury[]>([]);
+  const [performanceCorrelations, setPerformanceCorrelations] = useState<PerformanceCorrelations | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   function reloadOverview() {
@@ -855,6 +906,9 @@ function BodyView() {
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
     reloadInjuries();
+    fetchBodyPerformanceCorrelations()
+      .then(setPerformanceCorrelations)
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
 
   // Erst anfragen, sobald genug Trend-Daten für die Charts da sind (gleiche Bedingung wie unten
@@ -900,6 +954,8 @@ function BodyView() {
           <InjuryLogCard injuries={injuries} onReload={reloadInjuries} />
         </div>
       </div>
+
+      <PerformanceCorrelationsTile data={performanceCorrelations} />
 
       {trend && (
         <div className="card">

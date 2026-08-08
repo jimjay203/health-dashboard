@@ -609,6 +609,21 @@ export interface SleepOverview {
   sleep_vs_7d_avg_pct: number | null;
 }
 
+// Serverseitig EINMAL berechnet (siehe correlation_stats.py) und zusammen mit den Rohdaten
+// ausgeliefert - Chart-Badge (CorrelationChart.tsx) und Gemini-Einordnungstext (sleep_insight.py)
+// greifen dadurch auf exakt dieselben Zahlen zu und können nie auseinanderlaufen.
+export type CorrelationStrength = "none" | "weak" | "moderate" | "strong";
+
+export interface CorrelationStats {
+  n: number;
+  r: number | null;
+  slope: number | null;
+  intercept: number | null;
+  strength: CorrelationStrength;
+  direction: "positive" | "negative" | null;
+  sufficient: boolean;
+}
+
 // prev_day_* beschreiben den Vorabend dieser Nacht (Training/Journal/Habits VOR dem Einschlafen,
 // nicht den Tag der Nacht selbst - siehe Datums-Konvention in backend/routers/sleep.py).
 export interface SleepTrendPoint {
@@ -623,10 +638,16 @@ export interface SleepTrendPoint {
   sleep_need_seconds: number | null;
   sleep_debt_cumulative: number | null;
   avg_overnight_hrv: number | null;
+  // Autonome Erholungsmarker DIESER Nacht/dieses Tages - first_3h_resting_hr ist das 10. Perzentil
+  // der Ruhepuls-Messpunkte der ersten 3 Schlafstunden (siehe backend/routers/sleep.py).
+  first_3h_resting_hr: number | null;
+  resting_hr_vs_28d_avg_pct: number | null;
+  hrv_vs_28d_avg_pct: number | null;
   prev_day_training_load: number | null;
   prev_day_late_workout: boolean;
   prev_day_rpe: number | null;
   prev_day_caffeine_after_noon: boolean | null;
+  prev_day_anaerobic_seconds: number | null;
   // Serverseitig aus habit_tracker.last_screen_time (Vorabend) + sleep_start_local dieser Nacht
   // abgeleitet (siehe backend/routers/sleep.py::_screen_time_gap_minutes) - kein direkt
   // eingegebener Wert mehr (Uhrzeit lässt sich leichter erinnern als eine geschätzte Minutenzahl).
@@ -638,6 +659,7 @@ export interface SleepTrend {
   // LATE_WORKOUT_HOUR_THRESHOLD) - eine transparent offengelegte Annahme, keine harte Kennzahl.
   late_workout_hour_threshold: number;
   points: SleepTrendPoint[];
+  correlation_stats: Record<string, CorrelationStats>;
 }
 
 export function fetchSleepOverview(date: string): Promise<SleepOverview> {
@@ -1104,6 +1126,30 @@ export interface BodyTrend {
 
 export function fetchBodyTrend(days = 90): Promise<BodyTrend> {
   return fetch(`/api/body/trend?days=${days}`).then((res) => handle<BodyTrend>(res));
+}
+
+// "Körper- & Performance-Einfluss"-Kachel (siehe body_composition.py::get_performance_correlations) -
+// zwei Category-B-Korrelationen auf unterschiedlichen Aggregationsebenen (Tag/Woche), deshalb ein
+// eigener Endpoint statt einer Erweiterung von fetchBodyTrend.
+export interface WeightVsGa1PacePoint {
+  date: string;
+  weight_avg_kg: number | null;
+  ga1_pace_sec_per_km: number | null;
+}
+
+export interface WeeklyRunningLoadVsInjuryPoint {
+  week_id: string;
+  running_load: number;
+  max_pain_severity: number;
+}
+
+export interface PerformanceCorrelations {
+  weight_vs_ga1_pace: { points: WeightVsGa1PacePoint[]; stats: CorrelationStats };
+  weekly_running_load_vs_injury_severity: { points: WeeklyRunningLoadVsInjuryPoint[]; stats: CorrelationStats };
+}
+
+export function fetchBodyPerformanceCorrelations(days = 90): Promise<PerformanceCorrelations> {
+  return fetch(`/api/body/performance-correlations?days=${days}`).then((res) => handle<PerformanceCorrelations>(res));
 }
 
 // Gemini-Einordnung des 90-Tage-Trends (siehe body_trend_insight.py) - gleiches Muster wie

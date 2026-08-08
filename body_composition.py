@@ -17,10 +17,21 @@ derselben Messgruppe sind die konsistentere Paarung.
 """
 from datetime import date, datetime, timedelta
 
+import correlation_stats
+import injury_log
 from db import get_connection, upsert_by_key
+from load_focus import ZONE_LABELS_LOW_AEROBIC
+from training_zones import zone_bounds_for_date
+from weekly_summary import RUNNING_TYPES, iso_week_info
 
 BODY_TREND_MAX_DAYS = 365
 WEIGHT_ROLLING_AVG_WINDOW_DAYS = 7
+
+# "Körper- & Performance-Einfluss"-Kachel (siehe backend/routers/body.py::get_performance_
+# correlations) - eigene Tunables, analog zu training_zones.py/daily_summary.py.
+PERFORMANCE_CORRELATIONS_DAYS = 90       # gleicher Default wie get_body_trend()
+GA1_PACE_WINDOW_DAYS = 28                # gleiches Rollfenster wie load_focus.LOAD_FOCUS_WINDOW_DAYS -
+                                          # Läufe sind seltener als tägliche Wiegungen, 7 Tage wäre zu dünn.
 
 
 def _latest_withings_row():
@@ -399,4 +410,171 @@ def compute_what_if(target_weight_kg):
         "vo2max_running_current": vo2max_running,
         "vo2max_running_target": vo2max_running_target,
         "race_time_projection": race_time_projection,
+    }
+
+
+# --- "Körper- & Performance-Einfluss"-Kachel (Category-B-Korrelationen, siehe Plan) ---
+
+def _classify_hr_zone(hr, bounds):
+    for label, lo, hi in bounds:
+        if (lo is None or hr >= lo) and (hi is None or hr <= hi):
+            return label
+    return None
+
+
+def _weight_by_date(cursor, start, end):
+    """Ein Gewichtswert pro Tag (Withings bevorzugt, sonst Garmin - gleiche Quellen-Präferenz wie
+    _weight_series_for_range/_weight_for_date), hier zusätzlich mit Datum statt als flache Liste -
+    für die Tag-für-Tag-Rollierung unten gebraucht. Aufsteigend nach Zeitstempel iteriert, damit ein
+    späterer Dict-Eintrag pro Datum die jeweils letzte Messung des Tages überschreibt."""
+    result = {}
+    for r in cursor.execute(
+        "SELECT date, weight FROM withings_weigh_ins WHERE date >= ? AND date <= ? "
+        "AND weight IS NOT NULL ORDER BY timestamp",
+        (start, end)
+    ).fetchall():
+        result[r["date"]] = r["weight"]
+    for r in cursor.execute(
+        "SELECT date, weight FROM garmin_weigh_ins WHERE date >= ? AND date <= ? "
+        "AND weight IS NOT NULL ORDER BY timestamp_gmt",
+        (start, end)
+    ).fetchall():
+        # garmin_weigh_ins.weight ist in Gramm gespeichert (im Gegensatz zu withings_weigh_ins.weight
+        # in kg) - ground-truth verifiziert an echten Datensätzen (84100g vs. 84.941kg für dieselbe
+        # Messung am selben Tag). Siehe auch garmin_service.py:694 (dortige Power-to-Weight-Berechnung
+        # macht dieselbe /1000-Umrechnung).
+        result.setdefault(r["date"], r["weight"] / 1000.0)
+    return result
+
+
+def _weight_7d_avg_by_date(cursor, start_date, end_date):
+    """{date: 7-Tage-Rollschnitt}, NUR für Tage mit einer tatsächlichen Messung (gleiches Prinzip
+    wie get_body_trend()s weight_rolling_avg_kg - Wiegungen sind lückenhaft, ca. wöchentlich, ein
+    Wert für JEDEN Kalendertag im Bereich wäre deshalb überwiegend None). Fenster-Logik (wd <= d,
+    Differenz < WEIGHT_ROLLING_AVG_WINDOW_DAYS Tage) identisch zu get_body_trend()."""
+    lookback_start = (date.fromisoformat(start_date) - timedelta(days=WEIGHT_ROLLING_AVG_WINDOW_DAYS - 1)).isoformat()
+    by_date = _weight_by_date(cursor, lookback_start, end_date)
+    sorted_dates = sorted(by_date.keys())
+
+    result = {}
+    for d_str in sorted_dates:
+        if d_str < start_date or d_str > end_date:
+            continue
+        d = date.fromisoformat(d_str)
+        window = [
+            by_date[wd] for wd in sorted_dates
+            if wd <= d_str and (d - date.fromisoformat(wd)).days < WEIGHT_ROLLING_AVG_WINDOW_DAYS
+        ]
+        result[d_str] = sum(window) / len(window) if window else None
+    return result
+
+
+def _ga1_pace_by_date(cursor, start_date, end_date):
+    """{date: GA1-Pace (Sekunden/km)} - Ø-Pace der Lauf-Aktivitäten im jeweils vorangehenden
+    GA1_PACE_WINDOW_DAYS-Fenster, deren Ø-Herzfrequenz in Friel-Zone 1+2 liegt (siehe Plan-
+    Entscheidung: nächstliegende verifizierte Definition für "GA1", da Garmin dieses Konzept nicht
+    kennt). Zonen-Snapshot: neuester <= Aktivitätsdatum, sonst früheste verfügbare (siehe
+    training_zones.zone_bounds_for_date)."""
+    lookback_start = (date.fromisoformat(start_date) - timedelta(days=GA1_PACE_WINDOW_DAYS - 1)).isoformat()
+    activities = cursor.execute(
+        "SELECT date(start_time_local) AS d, activity_type, average_hr, average_speed "
+        "FROM garmin_activities WHERE date(start_time_local) >= ? AND date(start_time_local) <= ? "
+        "AND average_hr IS NOT NULL AND average_speed IS NOT NULL AND average_speed > 0",
+        (lookback_start, end_date)
+    ).fetchall()
+
+    zone_bounds_cache = {}
+    ga1_activities = []  # (date, pace_sec_per_km)
+    for a in activities:
+        if a["activity_type"] not in RUNNING_TYPES:
+            continue
+        if a["d"] not in zone_bounds_cache:
+            zone_bounds_cache[a["d"]] = zone_bounds_for_date(cursor, "training_zones_running", a["d"])
+        bounds = zone_bounds_cache[a["d"]]
+        if not bounds:
+            continue
+        label = _classify_hr_zone(a["average_hr"], bounds)
+        if label in ZONE_LABELS_LOW_AEROBIC:
+            ga1_activities.append((a["d"], 1000.0 / a["average_speed"]))
+
+    result = {}
+    d = date.fromisoformat(start_date)
+    end = date.fromisoformat(end_date)
+    while d <= end:
+        window_start = (d - timedelta(days=GA1_PACE_WINDOW_DAYS - 1)).isoformat()
+        d_str = d.isoformat()
+        paces = [p for (ad, p) in ga1_activities if window_start <= ad <= d_str]
+        result[d_str] = sum(paces) / len(paces) if paces else None
+        d += timedelta(days=1)
+    return result
+
+
+def _weekly_running_training_load(cursor, start_date, end_date):
+    """{week_id: Summe activity_training_load} über Lauf-Aktivitäten - "Trainingslast" statt reiner
+    Distanz (siehe Plan-Entscheidung: konsistent mit dem einen etablierten Load-Begriff dieser App,
+    ein harter und ein lockerer 10-km-Lauf sollen nicht gleich gewichtet werden)."""
+    rows = cursor.execute(
+        "SELECT date(start_time_local) AS d, activity_type, activity_training_load FROM garmin_activities "
+        "WHERE date(start_time_local) >= ? AND date(start_time_local) <= ? AND activity_training_load IS NOT NULL",
+        (start_date, end_date)
+    ).fetchall()
+    totals = {}
+    for r in rows:
+        if r["activity_type"] not in RUNNING_TYPES:
+            continue
+        week_id, *_ = iso_week_info(r["d"])
+        totals[week_id] = totals.get(week_id, 0.0) + r["activity_training_load"]
+    return totals
+
+
+def get_performance_correlations(days=PERFORMANCE_CORRELATIONS_DAYS):
+    """Zwei Category-B-Korrelationen für die "Körper- & Performance-Einfluss"-Kachel (Körper-Seite):
+    Körpergewicht (7-Tage-Schnitt) vs. GA1-Pace (Tages-Ebene) und wöchentlicher Lauf-Load vs.
+    maximale wöchentliche Schmerz-Intensität (Wochen-Ebene) - bewusst getrennt von get_body_trend()
+    (siehe Moduldocstring-Begründung im Plan: zwei unterschiedliche Aggregationsebenen, die
+    get_body_trend()s reine Tages-Punkt-Struktur nicht beide sauber abbilden würde)."""
+    days = min(days, BODY_TREND_MAX_DAYS)
+    end = date.today()
+    start = end - timedelta(days=days - 1)
+    start_iso, end_iso = start.isoformat(), end.isoformat()
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    weight_7d_avg = _weight_7d_avg_by_date(cursor, start_iso, end_iso)
+    ga1_pace = _ga1_pace_by_date(cursor, start_iso, end_iso)
+    weekly_load = _weekly_running_training_load(cursor, start_iso, end_iso)
+    conn.close()
+
+    weekly_severity = injury_log.weekly_max_severity(start_iso, end_iso)
+
+    # Nur Tage mit einer tatsächlichen Gewichtsmessung (weight_7d_avg ist bereits darauf begrenzt,
+    # siehe _weight_7d_avg_by_date) - GA1-Pace ist dagegen ein Rollwert für JEDEN Tag verfügbar.
+    weight_points = [
+        {"date": d_str, "weight_avg_kg": w, "ga1_pace_sec_per_km": ga1_pace.get(d_str)}
+        for d_str, w in sorted(weight_7d_avg.items())
+    ]
+    weight_vs_ga1_pairs = [
+        (pt["weight_avg_kg"], pt["ga1_pace_sec_per_km"]) for pt in weight_points
+        if pt["weight_avg_kg"] is not None and pt["ga1_pace_sec_per_km"] is not None
+    ]
+
+    # Wochen ohne Laufaktivität zählen als 0 Load (kein Trainingsreiz ist ein echter Wert, kein
+    # fehlender - gleiche Konvention wie daily_summary._daily_training_loads).
+    weekly_points = [
+        {"week_id": week_id, "running_load": weekly_load.get(week_id, 0.0), "max_pain_severity": severity}
+        for week_id, severity in sorted(weekly_severity.items())
+    ]
+    weekly_load_vs_severity_pairs = [
+        (pt["running_load"], pt["max_pain_severity"]) for pt in weekly_points
+    ]
+
+    return {
+        "weight_vs_ga1_pace": {
+            "points": weight_points,
+            "stats": correlation_stats.correlation_summary(weight_vs_ga1_pairs),
+        },
+        "weekly_running_load_vs_injury_severity": {
+            "points": weekly_points,
+            "stats": correlation_stats.correlation_summary(weekly_load_vs_severity_pairs),
+        },
     }

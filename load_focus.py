@@ -24,6 +24,7 @@ Verteilung tatsächlich zugrunde liegt.
 """
 from datetime import date, timedelta
 from db import get_connection
+from training_zones import zone_bounds_for_date
 
 LOAD_FOCUS_WINDOW_DAYS = 28
 
@@ -36,18 +37,6 @@ ZONE_TABLE_BY_ACTIVITY_TYPE = {
 ZONE_LABELS_LOW_AEROBIC = {"1", "2"}
 ZONE_LABELS_HIGH_AEROBIC = {"3"}
 # Alles andere (4, 5a, 5b, 5c) zählt als anaerob.
-
-
-def _zone_bounds_for_date(cursor, table, target_date):
-    row = cursor.execute(f"SELECT MAX(date) AS d FROM {table} WHERE date <= ?", (target_date,)).fetchone()
-    snapshot_date = row["d"]
-    if not snapshot_date:
-        row = cursor.execute(f"SELECT MIN(date) AS d FROM {table}").fetchone()
-        snapshot_date = row["d"]
-    if not snapshot_date:
-        return None
-    rows = cursor.execute(f"SELECT zone, hr_min, hr_max FROM {table} WHERE date = ?", (snapshot_date,)).fetchall()
-    return [(r["zone"], r["hr_min"], r["hr_max"]) for r in rows]
 
 
 def _classify_hr(hr, bounds):
@@ -86,6 +75,33 @@ def _activity_zone_seconds(cursor, activity_id, bounds):
     return seconds
 
 
+def _accumulate_zone_seconds(cursor, activities, zone_bounds_cache):
+    """Summiert low/high/anaerobic-Sekunden über eine Liste von Aktivitäts-Zeilen (activity_id,
+    activity_type, d, has_details_synced). zone_bounds_cache wird vom Aufrufer übergeben, damit
+    compute_zone_seconds_by_day denselben Cache über mehrere Tage hinweg wiederverwenden kann,
+    statt den Zonen-Snapshot pro Tag neu zu laden."""
+    total_low = total_high = total_anaerobic = 0.0
+    included_count = 0
+    for a in activities:
+        table = ZONE_TABLE_BY_ACTIVITY_TYPE.get(a["activity_type"])
+        if not table or not a["has_details_synced"]:
+            continue
+        cache_key = (table, a["d"])
+        if cache_key not in zone_bounds_cache:
+            zone_bounds_cache[cache_key] = zone_bounds_for_date(cursor, table, a["d"])
+        bounds = zone_bounds_cache[cache_key]
+        if not bounds:
+            continue
+        seconds = _activity_zone_seconds(cursor, a["activity_id"], bounds)
+        if seconds is None:
+            continue
+        total_low += seconds["low"]
+        total_high += seconds["high"]
+        total_anaerobic += seconds["anaerobic"]
+        included_count += 1
+    return {"low": total_low, "high": total_high, "anaerobic": total_anaerobic, "included_count": included_count}
+
+
 def compute_load_focus(target_date, window_days=LOAD_FOCUS_WINDOW_DAYS):
     """Belastungsfokus-Verteilung über die letzten window_days Tage bis einschließlich target_date.
     Gibt ein Dict mit low_aerobic_pct/high_aerobic_pct/anaerobic_pct (None, falls gar keine
@@ -101,40 +117,52 @@ def compute_load_focus(target_date, window_days=LOAD_FOCUS_WINDOW_DAYS):
         (start, target_date)
     ).fetchall()
 
-    total_low = total_high = total_anaerobic = 0.0
-    included_count = 0
-    zone_bounds_cache = {}
-
-    for a in activities:
-        table = ZONE_TABLE_BY_ACTIVITY_TYPE.get(a["activity_type"])
-        if not table or not a["has_details_synced"]:
-            continue
-        cache_key = (table, a["d"])
-        if cache_key not in zone_bounds_cache:
-            zone_bounds_cache[cache_key] = _zone_bounds_for_date(cursor, table, a["d"])
-        bounds = zone_bounds_cache[cache_key]
-        if not bounds:
-            continue
-        seconds = _activity_zone_seconds(cursor, a["activity_id"], bounds)
-        if seconds is None:
-            continue
-        total_low += seconds["low"]
-        total_high += seconds["high"]
-        total_anaerobic += seconds["anaerobic"]
-        included_count += 1
-
+    totals = _accumulate_zone_seconds(cursor, activities, {})
     conn.close()
 
-    total_seconds = total_low + total_high + total_anaerobic
+    total_seconds = totals["low"] + totals["high"] + totals["anaerobic"]
     result = {
         "low_aerobic_pct": None,
         "high_aerobic_pct": None,
         "anaerobic_pct": None,
-        "included_activities": included_count,
+        "included_activities": totals["included_count"],
         "total_activities_in_window": len(activities),
     }
     if total_seconds > 0:
-        result["low_aerobic_pct"] = total_low / total_seconds * 100
-        result["high_aerobic_pct"] = total_high / total_seconds * 100
-        result["anaerobic_pct"] = total_anaerobic / total_seconds * 100
+        result["low_aerobic_pct"] = totals["low"] / total_seconds * 100
+        result["high_aerobic_pct"] = totals["high"] / total_seconds * 100
+        result["anaerobic_pct"] = totals["anaerobic"] / total_seconds * 100
+    return result
+
+
+def compute_zone_seconds_by_day(start_date, end_date):
+    """Tag-für-Tag-Variante von compute_load_focus für die "Trainings-Intensität vs. Overnight-
+    HRV-Abweichung"-Korrelation (siehe correlation_stats.py-Verwendung in
+    backend/routers/sleep.py) - EINE Aktivitäts-Abfrage über den ganzen Zeitraum (kein Query pro
+    Tag), danach in Python nach Kalendertag gruppiert. anaerobic_seconds ist die "Trainings-
+    Intensität"-Kennzahl (Zone 4/5, siehe ZONE_LABELS_LOW_AEROBIC/HIGH_AEROBIC oben)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    activities = cursor.execute(
+        "SELECT activity_id, activity_type, date(start_time_local) AS d, has_details_synced "
+        "FROM garmin_activities WHERE date(start_time_local) >= ? AND date(start_time_local) <= ?",
+        (start_date, end_date)
+    ).fetchall()
+
+    by_day = {}
+    for a in activities:
+        by_day.setdefault(a["d"], []).append(a)
+
+    zone_bounds_cache = {}
+    result = {}
+    for day, day_activities in by_day.items():
+        totals = _accumulate_zone_seconds(cursor, day_activities, zone_bounds_cache)
+        result[day] = {
+            "low_aerobic_seconds": totals["low"],
+            "high_aerobic_seconds": totals["high"],
+            "anaerobic_seconds": totals["anaerobic"],
+            "included_activities": totals["included_count"],
+        }
+
+    conn.close()
     return result

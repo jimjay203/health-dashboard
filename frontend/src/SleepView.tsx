@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Line, Bar, Scatter } from "react-chartjs-2";
+import { Line, Bar } from "react-chartjs-2";
 import {
   Chart as ChartJS,
   LineElement,
@@ -30,6 +30,7 @@ import {
   type SleepCorrelationsInsight,
   type SleepTrendInsight,
 } from "./api";
+import { CorrelationScatter, CorrelationBoxplot } from "./CorrelationChart";
 import HabitTrackerCard from "./HabitTrackerCard";
 import { fixedYAxisWidth, X_AXIS_OFFSET } from "./HrvTrendPanel";
 import Icon from "./Icon";
@@ -703,137 +704,58 @@ function SleepRegularityChart({ points }: { points: SleepTrendPoint[] }) {
 
 // --- Korrelationen ---
 
-function CorrelationScatter({
-  title,
-  tooltip,
-  points,
-  xLabel,
-  color,
-}: {
-  title: string;
-  tooltip: string;
-  points: { x: number; y: number }[];
-  xLabel: string;
-  color: string;
-}) {
-  const gridColor = useCssVar("--border");
-  const textColor = useCssVar("--text");
-  if (points.length < 3) {
-    return (
-      <div className="hrv-trend-chart-block">
-        <div className="hrv-trend-chart-title">{title}</div>
-        <p className="week-rationale">Noch nicht genug Nächte mit beiden Werten für eine Auswertung.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="hrv-trend-chart-block">
-      <div className="hrv-trend-chart-title">
-        {title}
-        <InfoTooltip text={tooltip} />
-      </div>
-      <div className="hrv-trend-chart-canvas">
-        <Scatter
-          data={{ datasets: [{ label: title, data: points, backgroundColor: color, pointRadius: 4 }] }}
-          options={{
-            responsive: true,
-            maintainAspectRatio: false,
-            animation: false,
-            scales: {
-              x: { title: { display: true, text: xLabel, color: textColor, font: { size: 10 } }, grid: { color: gridColor }, ticks: { color: textColor, font: { size: 10 } } },
-              y: {
-                title: { display: true, text: "Sleep Score", color: textColor, font: { size: 10 } },
-                min: 0,
-                max: 100,
-                grid: { color: gridColor },
-                ticks: { color: textColor, font: { size: 10 }, maxTicksLimit: 4 },
-              },
-            },
-            plugins: {
-              legend: { display: false },
-              tooltip: { enabled: true, padding: 6, titleFont: { size: 11 }, bodyFont: { size: 11 } },
-            },
-          }}
-        />
-      </div>
-    </div>
-  );
-}
-
-function LateWorkoutComparisonChart({ points }: { points: SleepTrendPoint[] }) {
-  const gridColor = useCssVar("--border");
-  const textColor = useCssVar("--text");
+// Dünn - nur sportspezifisches Daten-Shaping (Gruppierung nach prev_day_late_workout), das echte
+// Boxplot-Rendering (inkl. Mindest-n-Gate) übernimmt CorrelationChart.tsx.
+function LateWorkoutFirst3hRhrBoxplot({ points }: { points: SleepTrendPoint[] }) {
   const accentColor = useCssVar("--accent");
 
-  const late = points.filter((p) => p.prev_day_late_workout && p.sleep_score != null).map((p) => p.sleep_score as number);
+  const late = points
+    .filter((p) => p.prev_day_late_workout && p.first_3h_resting_hr != null)
+    .map((p) => p.first_3h_resting_hr as number);
   const notLate = points
-    .filter((p) => !p.prev_day_late_workout && p.prev_day_training_load != null && p.sleep_score != null)
-    .map((p) => p.sleep_score as number);
-
-  if (late.length < 2 || notLate.length < 2) {
-    return (
-      <div className="hrv-trend-chart-block">
-        <div className="hrv-trend-chart-title">Späte Einheit am Vorabend vs. Schlaf-Score</div>
-        <p className="week-rationale">Noch nicht genug Nächte mit und ohne späte Einheit für eine Auswertung.</p>
-      </div>
-    );
-  }
-
-  const avg = (arr: number[]) => arr.reduce((sum, v) => sum + v, 0) / arr.length;
+    .filter((p) => !p.prev_day_late_workout && p.prev_day_training_load != null && p.first_3h_resting_hr != null)
+    .map((p) => p.first_3h_resting_hr as number);
 
   return (
-    <div className="hrv-trend-chart-block">
-      <div className="hrv-trend-chart-title">
-        Späte Einheit am Vorabend vs. Schlaf-Score
-        <InfoTooltip text="Vergleicht den durchschnittlichen Sleep Score von Nächten nach einem Training ab 18 Uhr mit Nächten ohne (späte) Trainingseinheit am Vorabend." />
-      </div>
-      <div className="hrv-trend-chart-canvas">
-        <Bar
-          data={{
-            labels: [`Training ≥18 Uhr (${late.length})`, `Kein spätes Training (${notLate.length})`],
-            datasets: [
-              {
-                label: "Ø Sleep Score",
-                data: [avg(late), avg(notLate)],
-                backgroundColor: [SLEEP_DURATION_MODERATE, accentColor],
-                borderRadius: 2,
-              },
-            ],
-          }}
-          options={{
-            responsive: true,
-            maintainAspectRatio: false,
-            animation: false,
-            scales: {
-              x: { grid: { display: false }, ticks: { color: textColor, font: { size: 10 } } },
-              y: { min: 0, max: 100, grid: { color: gridColor }, ticks: { color: textColor, font: { size: 10 }, maxTicksLimit: 4 } },
-            },
-            plugins: {
-              legend: { display: false },
-              tooltip: { enabled: true, padding: 6, titleFont: { size: 11 }, bodyFont: { size: 11 } },
-            },
-          }}
-        />
-      </div>
-    </div>
+    <CorrelationBoxplot
+      title="Späte Einheit am Vorabend vs. Ruhepuls erste 3 Schlafstunden"
+      tooltip="Vergleicht den Ruhepuls der ersten 3 Schlafstunden (10. Perzentil der Ruhepuls-Messpunkte) von Nächten nach einem Training ab 18 Uhr mit Nächten ohne (späte) Trainingseinheit am Vorabend. Niedriger ist hier besser (bessere Erholung)."
+      yLabel="Ruhepuls erste 3h (bpm)"
+      groups={[
+        { label: "Training ≥18 Uhr", values: late },
+        { label: "Kein spätes Training", values: notLate },
+      ]}
+      color={accentColor}
+    />
   );
 }
 
-function SleepCorrelations({ points, lateThreshold }: { points: SleepTrendPoint[]; lateThreshold: number }) {
+function SleepCorrelations({
+  points,
+  lateThreshold,
+  correlationStats,
+}: {
+  points: SleepTrendPoint[];
+  lateThreshold: number;
+  correlationStats: SleepTrend["correlation_stats"];
+}) {
   const accentColor = useCssVar("--accent");
 
   const trainingLoadPoints = points
     .filter((p) => p.prev_day_training_load != null && p.sleep_score != null)
     .map((p) => ({ x: p.prev_day_training_load as number, y: p.sleep_score as number }));
 
-  const hrvPoints = points
-    .filter((p) => p.avg_overnight_hrv != null && p.sleep_score != null)
-    .map((p) => ({ x: p.avg_overnight_hrv as number, y: p.sleep_score as number }));
-
   const rpePoints = points
     .filter((p) => p.prev_day_rpe != null && p.sleep_score != null)
     .map((p) => ({ x: p.prev_day_rpe as number, y: p.sleep_score as number }));
+
+  const trainingLoadVsRhrPoints = points
+    .filter((p) => p.prev_day_training_load != null && p.resting_hr_vs_28d_avg_pct != null)
+    .map((p) => ({ x: p.prev_day_training_load as number, y: p.resting_hr_vs_28d_avg_pct as number }));
+
+  const anaerobicVsHrvPoints = points
+    .filter((p) => p.prev_day_anaerobic_seconds != null && p.hrv_vs_28d_avg_pct != null)
+    .map((p) => ({ x: (p.prev_day_anaerobic_seconds as number) / 60, y: p.hrv_vs_28d_avg_pct as number }));
 
   return (
     <>
@@ -842,22 +764,41 @@ function SleepCorrelations({ points, lateThreshold }: { points: SleepTrendPoint[
         tooltip="Jeder Punkt eine Nacht: x = Summe der Trainingslast des Vortages (garmin_activities.activity_training_load), y = Sleep Score dieser Nacht."
         points={trainingLoadPoints}
         xLabel="Trainingslast (Vortag)"
+        yLabel="Sleep Score"
+        yMin={0}
+        yMax={100}
         color={accentColor}
+        stats={correlationStats.training_load_vs_sleep_score}
       />
-      <LateWorkoutComparisonChart points={points} />
-      <CorrelationScatter
-        title="Overnight-HRV vs. Schlaf-Score"
-        tooltip="Jeder Punkt eine Nacht: x = durchschnittliche HRV während des Schlafs, y = Sleep Score derselben Nacht."
-        points={hrvPoints}
-        xLabel="Overnight-HRV (ms)"
-        color={PHASE_REM_COLOR}
-      />
+      <LateWorkoutFirst3hRhrBoxplot points={points} />
       <CorrelationScatter
         title="Belastungsempfinden (RPE) am Vorabend vs. Schlaf-Score"
         tooltip={`Jeder Punkt eine Nacht: x = RPE-Wert aus dem Tagesjournal des Vortages, y = Sleep Score dieser Nacht. Training ab ${lateThreshold} Uhr zählt hier zusätzlich als "späte Einheit" im Vergleichs-Chart oben.`}
         points={rpePoints}
         xLabel="RPE (Vortag, 1-10)"
+        yLabel="Sleep Score"
+        yMin={0}
+        yMax={100}
         color={SLEEP_DURATION_LOW}
+        stats={correlationStats.rpe_vs_sleep_score}
+      />
+      <CorrelationScatter
+        title="Trainingslast am Vorabend vs. Ruhepuls-Abweichung"
+        tooltip="Jeder Punkt eine Nacht: x = Summe der Trainingslast des Vortages, y = Ruhepuls dieser Nacht vs. 28-Tage-Schnitt (in %). Positiv = höherer Ruhepuls als üblich (schlechtere Erholung)."
+        points={trainingLoadVsRhrPoints}
+        xLabel="Trainingslast (Vortag)"
+        yLabel="Ruhepuls vs. 28d-Schnitt (%)"
+        color={PHASE_REM_COLOR}
+        stats={correlationStats.training_load_vs_resting_hr_deviation}
+      />
+      <CorrelationScatter
+        title="Trainings-Intensität am Vorabend vs. Overnight-HRV-Abweichung"
+        tooltip="Jeder Punkt eine Nacht: x = anaerobe Trainingszeit des Vortages (Friel-Zone 4/5, Minuten), y = HRV dieser Nacht vs. 28-Tage-Schnitt (in %). Positiv = höhere HRV als üblich (bessere Erholung)."
+        points={anaerobicVsHrvPoints}
+        xLabel="Zone 4/5-Zeit Vortag (Min)"
+        yLabel="HRV vs. 28d-Schnitt (%)"
+        color={PHASE_DEEP_COLOR}
+        stats={correlationStats.anaerobic_seconds_vs_hrv_deviation}
       />
     </>
   );
@@ -912,34 +853,6 @@ function SleepView() {
         <>
           <div className="card">
             <h3>
-              Trend (28 Tage)
-              <InsightRegenerateButton regenerateFn={regenerateSleepTrendInsight} onRegenerated={setTrendInsight} />
-            </h3>
-            <div className="sleep-trend-row">
-              <div className="sleep-insight-col">
-                {trendInsightLoading ? (
-                  <p className="week-rationale">Lade…</p>
-                ) : trendInsight?.insight_text ? (
-                  <>
-                    <p className="sleep-insight-text">
-                      <Icon name="auto_awesome" className="ai-text-icon" />
-                      {trendInsight.insight_text}
-                    </p>
-                    <p className="ai-text-timestamp">Erstellt: {formatGeneratedAt(trendInsight.generated_at)}</p>
-                  </>
-                ) : (
-                  <p className="week-rationale">Noch nicht generiert - über den Pfeil oben erzeugen.</p>
-                )}
-              </div>
-              <div className="hrv-trend-panel">
-                <SleepDurationChart points={trend.points} />
-                <SleepPhaseTrendChart points={trend.points} />
-                <SleepRegularityChart points={trend.points} />
-              </div>
-            </div>
-          </div>
-          <div className="card">
-            <h3>
               Korrelationen
               <InfoTooltip text="Rein beobachtend, keine statistische Signifikanzprüfung - bei wenigen Nächten können einzelne Ausreißer das Bild stark verzerren." />
               <InsightRegenerateButton
@@ -964,7 +877,39 @@ function SleepView() {
                 )}
               </div>
               <div className="sleep-correlations-grid">
-                <SleepCorrelations points={trend.points} lateThreshold={trend.late_workout_hour_threshold} />
+                <SleepCorrelations
+                  points={trend.points}
+                  lateThreshold={trend.late_workout_hour_threshold}
+                  correlationStats={trend.correlation_stats}
+                />
+              </div>
+            </div>
+          </div>
+          <div className="card">
+            <h3>
+              Trend (28 Tage)
+              <InsightRegenerateButton regenerateFn={regenerateSleepTrendInsight} onRegenerated={setTrendInsight} />
+            </h3>
+            <div className="sleep-trend-row">
+              <div className="sleep-insight-col">
+                {trendInsightLoading ? (
+                  <p className="week-rationale">Lade…</p>
+                ) : trendInsight?.insight_text ? (
+                  <>
+                    <p className="sleep-insight-text">
+                      <Icon name="auto_awesome" className="ai-text-icon" />
+                      {trendInsight.insight_text}
+                    </p>
+                    <p className="ai-text-timestamp">Erstellt: {formatGeneratedAt(trendInsight.generated_at)}</p>
+                  </>
+                ) : (
+                  <p className="week-rationale">Noch nicht generiert - über den Pfeil oben erzeugen.</p>
+                )}
+              </div>
+              <div className="hrv-trend-panel">
+                <SleepDurationChart points={trend.points} />
+                <SleepPhaseTrendChart points={trend.points} />
+                <SleepRegularityChart points={trend.points} />
               </div>
             </div>
           </div>

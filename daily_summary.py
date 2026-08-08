@@ -251,6 +251,7 @@ def compute_daily_summary(target_date):
     hrv_vs_28d = _pct_vs_baseline(avg_hrv, _baseline_avg(cursor, "avg_hrv", target_date, 28))
     sleep_vs_7d = _pct_vs_baseline(sleep_hours, _baseline_avg(cursor, "sleep_hours", target_date, 7))
     rhr_vs_7d = _pct_vs_baseline(resting_hr, _baseline_avg(cursor, "resting_hr", target_date, 7))
+    rhr_vs_28d = _pct_vs_baseline(resting_hr, _baseline_avg(cursor, "resting_hr", target_date, 28))
 
     training_load_7d, training_monotony, training_strain = _training_monotony_and_strain(cursor, target_date)
     training_load_28d = _training_load_sum(cursor, target_date, 28)
@@ -289,6 +290,7 @@ def compute_daily_summary(target_date):
         "hrv_vs_28d_avg_pct": hrv_vs_28d,
         "sleep_vs_7d_avg_pct": sleep_vs_7d,
         "resting_hr_vs_7d_avg_pct": rhr_vs_7d,
+        "resting_hr_vs_28d_avg_pct": rhr_vs_28d,
         "training_load_7d": training_load_7d,
         "training_load_28d": training_load_28d,
         "acute_chronic_ratio": acute_chronic_ratio,

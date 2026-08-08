@@ -10,20 +10,31 @@ und am Morgen von D endet (Garmins eigene calendarDate-Konvention, ground-truth 
 die Korrelation werden deshalb bewusst Trainings-/Journal-/Habit-Daten von D-1 herangezogen, nicht
 von D selbst.
 """
+import bisect
 import json
 from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+import correlation_stats
+import load_focus
 from db import get_connection
 import habit_tracker
 from sleep_insight import generate_correlations_insight, get_cached_correlations_insight
 from sleep_trend_insight import generate_trend_insight, get_cached_trend_insight
+from ._correlation_models import CorrelationStatsOut
 
 router = APIRouter(prefix="/api/sleep", tags=["sleep"])
 
 SLEEP_TREND_MAX_DAYS = 90
+
+# "Ruhepuls erste 3 Schlafstunden" - Ersatz für sub-nächtliche HRV (existiert bei Garmin nicht),
+# abgeleitet aus garmin_heart_rate_timeseries (2-Min-Granularität) im Fenster [sleep_start, +3h).
+# 10. Perzentil statt Minimum (robuster gegen einzelne Sensor-Ausreißer) oder Mittelwert (durch
+# Mikro-Aufwachreaktionen nach oben verzerrt) - siehe Plan-Entscheidung.
+FIRST_3H_WINDOW_HOURS = 3
+FIRST_3H_RESTING_HR_PERCENTILE = 10
 
 
 def _validate_date(date_str):
@@ -58,6 +69,76 @@ def _screen_time_gap_minutes(last_screen_time, sleep_start_local):
     sleep_start_dt = datetime.fromisoformat(sleep_start_local)
     gap_minutes = (sleep_start_dt - screen_dt).total_seconds() / 60
     return max(0, round(gap_minutes))
+
+
+def _percentile(values, pct):
+    """Lineare Interpolation zwischen den beiden umgebenden Rängen (gleiche Methode wie numpys
+    Standard-'linear'-Perzentil) - keine neue Abhängigkeit für eine einzelne Kennzahl nötig."""
+    if not values:
+        return None
+    s = sorted(values)
+    if len(s) == 1:
+        return s[0]
+    k = (len(s) - 1) * (pct / 100.0)
+    f = int(k)
+    c = min(f + 1, len(s) - 1)
+    if f == c:
+        return s[f]
+    return s[f] + (s[c] - s[f]) * (k - f)
+
+
+def _first_3h_resting_hr_by_night(cursor, start_date, end_date):
+    """{date: first_3h_resting_hr} für jede Nacht im Bereich - EINE Abfrage über den ganzen
+    Zeitraum gegen garmin_heart_rate_timeseries (kein Query pro Nacht), Fenster-Filterung per
+    bisect auf der global sortierten Timestamp-Liste.
+
+    Ground-Truth-Fund: dailySleepDTO.sleepStartTimestampGMT ist bereits der echte UTC-Epoch-ms-
+    Nachtbeginn (im Gegensatz zu sleepStartTimestampLocal, das um den Zeitzonen-Offset
+    vorverschoben ist, siehe garmin_service._epoch_ms_local_to_iso) - exakt dieselbe Zeitbasis wie
+    garmin_heart_rate_timeseries.timestamp (verifiziert: stimmt mit heartRateValues' echtem
+    UTC-Timestamp überein, siehe garmin_api_exploration/get_heart_rates.json). Kein Offset-Umrechnen
+    nötig, GMT-Feld direkt verwendbar. garmin_heart_rate_timeseries.date ist NICHT die UTC-
+    Kalenderdatum-Partition der einzelnen Messpunkte (das Feld ist Garmins Sync-Anfragedatum,
+    lokal-basiert) - deshalb wird hier bewusst über den globalen timestamp-Bereich gefiltert, nicht
+    über die date-Spalte, sonst würden Messpunkte vor lokaler Mitternacht (häufig bei einem
+    Schlafbeginn kurz vor Mitternacht) fälschlich der falschen Nacht zugeordnet oder übersprungen."""
+    raw_rows = cursor.execute(
+        "SELECT date, raw_json FROM garmin_daily WHERE date >= ? AND date <= ? AND raw_json IS NOT NULL",
+        (start_date, end_date)
+    ).fetchall()
+
+    windows = {}
+    for r in raw_rows:
+        try:
+            blob = json.loads(r["raw_json"])
+        except json.JSONDecodeError:
+            continue
+        dto = (blob.get("sleep") or {}).get("dailySleepDTO") or {}
+        gmt_start = dto.get("sleepStartTimestampGMT")
+        if gmt_start is None:
+            continue
+        windows[r["date"]] = (gmt_start, gmt_start + FIRST_3H_WINDOW_HOURS * 3600 * 1000)
+
+    if not windows:
+        return {}
+
+    global_min = min(w[0] for w in windows.values())
+    global_max = max(w[1] for w in windows.values())
+    hr_rows = cursor.execute(
+        "SELECT timestamp, heart_rate FROM garmin_heart_rate_timeseries "
+        "WHERE timestamp >= ? AND timestamp < ? AND heart_rate IS NOT NULL ORDER BY timestamp",
+        (global_min, global_max)
+    ).fetchall()
+    timestamps = [r["timestamp"] for r in hr_rows]
+    hr_values = [r["heart_rate"] for r in hr_rows]
+
+    result = {}
+    for d, (w_start, w_end) in windows.items():
+        lo = bisect.bisect_left(timestamps, w_start)
+        hi = bisect.bisect_left(timestamps, w_end)
+        window_values = hr_values[lo:hi]
+        result[d] = _percentile(window_values, FIRST_3H_RESTING_HR_PERCENTILE) if window_values else None
+    return result
 
 
 # --- Letzte Nacht im Detail ---
@@ -243,11 +324,17 @@ class SleepTrendPoint(BaseModel):
     sleep_need_seconds: int | None = None
     sleep_debt_cumulative: float | None = None
     avg_overnight_hrv: float | None = None
+    # Autonome Erholungsmarker DIESER Nacht/dieses Tages (date=D, siehe Moduldocstring) - für die
+    # neuen Category-A-Korrelationen (Trainingslast/-intensität des Vorabends vs. Erholung).
+    first_3h_resting_hr: float | None = None
+    resting_hr_vs_28d_avg_pct: float | None = None
+    hrv_vs_28d_avg_pct: float | None = None
     # Korrelations-Inputs - beschreiben den VORABEND dieser Nacht (siehe Moduldocstring).
     prev_day_training_load: float | None = None
     prev_day_late_workout: bool = False
     prev_day_rpe: int | None = None
     prev_day_caffeine_after_noon: bool | None = None
+    prev_day_anaerobic_seconds: float | None = None
     # Abgeleitet aus habit_tracker.last_screen_time (Vorabend) + sleep_start_local dieser Nacht,
     # siehe _screen_time_gap_minutes.
     prev_day_screen_time_gap_minutes: int | None = None
@@ -256,6 +343,10 @@ class SleepTrendPoint(BaseModel):
 class SleepTrendResponse(BaseModel):
     late_workout_hour_threshold: int = LATE_WORKOUT_HOUR_THRESHOLD
     points: list[SleepTrendPoint] = []
+    # Ein Eintrag pro Scatter-Korrelations-Chart (Late-Workout-Boxplot ausgenommen - das ist ein
+    # Gruppenvergleich, kein Pearson-r) - serverseitig EINMAL berechnet (siehe correlation_stats.py),
+    # damit Chart-Badge und Gemini-Einordnungstext (sleep_insight.py) nie auseinanderlaufen.
+    correlation_stats: dict[str, CorrelationStatsOut] = {}
 
 
 @router.get("/trend", response_model=SleepTrendResponse)
@@ -283,7 +374,8 @@ def get_sleep_trend(days: int = 28) -> SleepTrendResponse:
     summary_rows = {
         r["date"]: dict(r)
         for r in conn.execute(
-            "SELECT date, sleep_debt_cumulative FROM daily_summary WHERE date >= ? AND date <= ?",
+            "SELECT date, sleep_debt_cumulative, resting_hr_vs_28d_avg_pct, hrv_vs_28d_avg_pct "
+            "FROM daily_summary WHERE date >= ? AND date <= ?",
             (start.isoformat(), end.isoformat())
         ).fetchall()
     }
@@ -299,7 +391,15 @@ def get_sleep_trend(days: int = 28) -> SleepTrendResponse:
         "FROM garmin_activities WHERE date(start_time_local) >= ? AND date(start_time_local) <= ?",
         ((start - timedelta(days=1)).isoformat(), end.isoformat())
     ).fetchall()
+    first_3h_by_night = _first_3h_resting_hr_by_night(conn, start.isoformat(), end.isoformat())
     conn.close()
+
+    # Vortages-Trainings-Intensität (Zone 4/5) - eigene Verbindung, dieselbe geteilte
+    # _accumulate_zone_seconds-Logik wie load_focus.compute_load_focus (siehe dortige
+    # Regressionsverifikation gegen den bekannten 94%-niedrig-aerob-Wert).
+    zone_seconds_by_day = load_focus.compute_zone_seconds_by_day(
+        (start - timedelta(days=1)).isoformat(), end.isoformat()
+    )
 
     activities_by_date: dict[str, list] = {}
     for r in activity_rows:
@@ -320,6 +420,7 @@ def get_sleep_trend(days: int = 28) -> SleepTrendResponse:
         prev_journal = journal_rows.get(prev_date_str, {})
         prev_habits = habit_rows.get(prev_date_str, {})
         prev_activities = activities_by_date.get(prev_date_str, [])
+        prev_zone_seconds = zone_seconds_by_day.get(prev_date_str)
 
         training_load_sum = None
         late_workout = False
@@ -343,19 +444,42 @@ def get_sleep_trend(days: int = 28) -> SleepTrendResponse:
             sleep_need_seconds=s.get("sleep_need_seconds"),
             sleep_debt_cumulative=summary.get("sleep_debt_cumulative"),
             avg_overnight_hrv=s.get("avg_overnight_hrv"),
+            first_3h_resting_hr=first_3h_by_night.get(date_str),
+            resting_hr_vs_28d_avg_pct=summary.get("resting_hr_vs_28d_avg_pct"),
+            hrv_vs_28d_avg_pct=summary.get("hrv_vs_28d_avg_pct"),
             prev_day_training_load=training_load_sum,
             prev_day_late_workout=late_workout,
             prev_day_rpe=prev_journal.get("rpe_score"),
             prev_day_caffeine_after_noon=(
                 bool(prev_habits["caffeine_after_noon"]) if prev_habits.get("caffeine_after_noon") is not None else None
             ),
+            prev_day_anaerobic_seconds=prev_zone_seconds["anaerobic_seconds"] if prev_zone_seconds else None,
             prev_day_screen_time_gap_minutes=_screen_time_gap_minutes(
                 prev_habits.get("last_screen_time"), s.get("sleep_start_local")
             ),
         ))
         d += timedelta(days=1)
 
-    return SleepTrendResponse(points=points)
+    stats = {
+        "training_load_vs_sleep_score": correlation_stats.correlation_summary([
+            (p.prev_day_training_load, p.sleep_score) for p in points
+            if p.prev_day_training_load is not None and p.sleep_score is not None
+        ]),
+        "rpe_vs_sleep_score": correlation_stats.correlation_summary([
+            (p.prev_day_rpe, p.sleep_score) for p in points
+            if p.prev_day_rpe is not None and p.sleep_score is not None
+        ]),
+        "training_load_vs_resting_hr_deviation": correlation_stats.correlation_summary([
+            (p.prev_day_training_load, p.resting_hr_vs_28d_avg_pct) for p in points
+            if p.prev_day_training_load is not None and p.resting_hr_vs_28d_avg_pct is not None
+        ]),
+        "anaerobic_seconds_vs_hrv_deviation": correlation_stats.correlation_summary([
+            (p.prev_day_anaerobic_seconds, p.hrv_vs_28d_avg_pct) for p in points
+            if p.prev_day_anaerobic_seconds is not None and p.hrv_vs_28d_avg_pct is not None
+        ]),
+    }
+
+    return SleepTrendResponse(points=points, correlation_stats=stats)
 
 
 # --- Gemini-Einordnung der Korrelationen (siehe sleep_insight.py) ---

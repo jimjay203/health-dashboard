@@ -55,6 +55,22 @@ CYCLING_POWER_ZONES_PCT = [
 ]
 
 
+def zone_bounds_for_date(cursor, table, target_date):
+    """Neuester Zonen-Snapshot <= target_date aus table, sonst der früheste verfügbare (Zonen-
+    Snapshots existieren nur für "heute"-Syncs, nicht für jeden Backfill-Tag - siehe
+    recompute_zones-Docstring). Verschoben aus load_focus.py (dort ursprünglich privat), da
+    body_composition.py::_ga1_pace_by_date denselben Lookup für Lauf-Aktivitäten braucht."""
+    row = cursor.execute(f"SELECT MAX(date) AS d FROM {table} WHERE date <= ?", (target_date,)).fetchone()
+    snapshot_date = row["d"]
+    if not snapshot_date:
+        row = cursor.execute(f"SELECT MIN(date) AS d FROM {table}").fetchone()
+        snapshot_date = row["d"]
+    if not snapshot_date:
+        return None
+    rows = cursor.execute(f"SELECT zone, hr_min, hr_max FROM {table} WHERE date = ?", (snapshot_date,)).fetchall()
+    return [(r["zone"], r["hr_min"], r["hr_max"]) for r in rows]
+
+
 def _fetch_row(cursor, table, target_date):
     cursor.execute(f"SELECT * FROM {table} WHERE date = ?", (target_date,))
     row = cursor.fetchone()

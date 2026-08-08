@@ -24,7 +24,10 @@ TRAINING_PHASE_LOOKBACK_WEEKS = 3
 POLARIZATION_MIN_Z1_Z2_PCT = 70.0       # gängige Polarised-Training-Richtgröße
 
 
-def _iso_week_info(target_date):
+def iso_week_info(target_date):
+    """ISO-Wochen-Bucketing (week_id, iso_year, iso_week, week_start, week_end) für target_date.
+    Public (vormals _iso_week_info) - injury_log.py::weekly_max_severity nutzt dieselbe Logik
+    zum Bucketing statt eine zweite ISO-Wochen-Implementierung zu bauen."""
     d = date.fromisoformat(target_date)
     iso_year, iso_week, iso_weekday = d.isocalendar()
     week_start = d - timedelta(days=iso_weekday - 1)
@@ -218,7 +221,7 @@ def _notable_events_text(discipline_limiter, training_phase, days_until_race, zo
 def compute_weekly_summary(target_date):
     """Berechnet und speichert die weekly_summary-Zeile für die ISO-Woche, in der target_date
     liegt. Rein lesend/rechnend auf bereits synchronisierten Daten - kein API-Call."""
-    week_id, iso_year, iso_week, week_start, week_end = _iso_week_info(target_date)
+    week_id, iso_year, iso_week, week_start, week_end = iso_week_info(target_date)
 
     conn = get_connection()
     cursor = conn.cursor()

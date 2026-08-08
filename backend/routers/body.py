@@ -12,6 +12,7 @@ from pydantic import BaseModel
 import body_composition
 import injury_log
 from body_trend_insight import generate_trend_insight, get_cached_trend_insight
+from ._correlation_models import CorrelationStatsOut
 
 router = APIRouter(prefix="/api/body", tags=["body"])
 
@@ -126,6 +127,41 @@ def regenerate_trend_insight() -> TrendInsightResponse:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Einordnung konnte nicht generiert werden: {e}")
     return TrendInsightResponse(**fresh)
+
+
+# --- "Körper- & Performance-Einfluss"-Kachel (Category-B-Korrelationen, siehe body_composition.py::
+# get_performance_correlations) ---
+
+class WeightVsGa1PacePoint(BaseModel):
+    date: str
+    weight_avg_kg: float | None = None
+    ga1_pace_sec_per_km: float | None = None
+
+
+class WeeklyRunningLoadVsInjuryPoint(BaseModel):
+    week_id: str
+    running_load: float
+    max_pain_severity: int
+
+
+class WeightVsGa1PaceResponse(BaseModel):
+    points: list[WeightVsGa1PacePoint] = []
+    stats: CorrelationStatsOut
+
+
+class WeeklyRunningLoadVsInjuryResponse(BaseModel):
+    points: list[WeeklyRunningLoadVsInjuryPoint] = []
+    stats: CorrelationStatsOut
+
+
+class PerformanceCorrelationsResponse(BaseModel):
+    weight_vs_ga1_pace: WeightVsGa1PaceResponse
+    weekly_running_load_vs_injury_severity: WeeklyRunningLoadVsInjuryResponse
+
+
+@router.get("/performance-correlations", response_model=PerformanceCorrelationsResponse)
+def get_performance_correlations(days: int = body_composition.PERFORMANCE_CORRELATIONS_DAYS) -> PerformanceCorrelationsResponse:
+    return PerformanceCorrelationsResponse(**body_composition.get_performance_correlations(days))
 
 
 # --- What-if-Simulator ---

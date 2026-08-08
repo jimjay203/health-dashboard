@@ -3,9 +3,10 @@ CRUD für das Schmerz-/Verletzungsprotokoll auf der Körper-Seite (siehe backend
 Reine Python-Logik, kein Streamlit-Import (gleiches Muster wie performance_goals.py).
 resolved_at=NULL markiert einen noch aktiven Eintrag ("aktive Baustelle").
 """
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 from db import get_connection
+from weekly_summary import iso_week_info
 
 
 def list_injuries(active_only=False):
@@ -76,3 +77,31 @@ def delete_injury(injury_id):
     conn.execute("DELETE FROM injury_log WHERE id = ?", (injury_id,))
     conn.commit()
     conn.close()
+
+
+def weekly_max_severity(start_date, end_date):
+    """{week_id: max_severity} für jede ISO-Woche im Zeitraum [start_date, end_date] - Maximum
+    (nicht Durchschnitt) pro Woche, da ein einzelner starker Schmerztag die klinisch relevantere
+    Belastungsgrenze ist als ein geglätteter Wochenschnitt (siehe Plan-Entscheidung). Wochen ohne
+    Eintrag zählen als 0 (schmerzfrei), nicht als fehlend - sonst wäre die Stichprobe der
+    "Wöchentlicher Lauf-Load vs. Schmerz-Intensität"-Korrelation zu "nur schlechte Wochen" verzerrt."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT date, severity FROM injury_log WHERE date >= ? AND date <= ? AND severity IS NOT NULL",
+        (start_date, end_date)
+    ).fetchall()
+    conn.close()
+
+    result = {}
+    current = date.fromisoformat(start_date)
+    end = date.fromisoformat(end_date)
+    while current <= end:
+        week_id, *_ = iso_week_info(current.isoformat())
+        result.setdefault(week_id, 0)
+        current += timedelta(days=1)
+
+    for r in rows:
+        week_id, *_ = iso_week_info(r["date"])
+        result[week_id] = max(result[week_id], r["severity"])
+
+    return result
