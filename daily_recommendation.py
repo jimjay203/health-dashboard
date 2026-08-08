@@ -9,12 +9,17 @@ eingetragene Zusatzinfos reserviert (siehe insight_memory.py). Ergebnis landet s
 eigenen daily_recommendation-Tabelle.
 """
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from google.genai import types
 from db import get_connection, upsert_daily_metric
 from gemini_client import MODEL_NAME, get_client
 from context_blocks import insight_memory_block, daily_summary_block, weekly_plan_block, strip_markdown_fences
+
+# Kurzer Trend statt nur einem Tages-Schnappschuss - unterscheidet einen einzelnen Ausreißer von
+# einem sich aufbauenden Muster (siehe SYSTEM_PROMPT). 5 Tage: lang genug, um einen echten Trend
+# von Tagesrauschen zu unterscheiden, kurz genug, um im Prompt kompakt zu bleiben.
+HRV_RHR_TREND_WINDOW_DAYS = 5
 
 RESPONSE_SCHEMA = {
     "type": "OBJECT",
@@ -27,11 +32,16 @@ RESPONSE_SCHEMA = {
 
 SYSTEM_PROMPT = """
 Du bist ein Trainings-Coach-Assistent für einen Marathon-/Triathlon-Athleten. Du bekommst
-Tages-/Wochen-Kennzahlen, das heutige Tagesjournal, ein Erkenntnis-Gedächtnis mit dauerhaften
-Zusatzinfos zum Athleten, heutige Termine sowie den WOCHENPLAN (ein bereits am Wochenanfang
-generierter Grobvorschlag für heute, falls vorhanden - dient als Ausgangspunkt, nicht als
-bindende Vorgabe: berücksichtige die aktuellen Tages-Kennzahlen trotzdem, ein guter Grund kann
-vom Wochenplan abweichen).
+Tages-/Wochen-Kennzahlen, einen HRV-/Ruhepuls-Trend der letzten Tage, das heutige Tagesjournal,
+ein Erkenntnis-Gedächtnis mit dauerhaften Zusatzinfos zum Athleten, heutige Termine sowie den
+WOCHENPLAN (ein bereits am Wochenanfang generierter Grobvorschlag für heute, falls vorhanden -
+dient als Ausgangspunkt, nicht als bindende Vorgabe: berücksichtige die aktuellen Tages-Kennzahlen
+trotzdem, ein guter Grund kann vom Wochenplan abweichen).
+
+Nutze den HRV-/Ruhepuls-Trend gezielt, um einen einzelnen Ausreißer-Tag von einem sich über
+mehrere Tage aufbauenden Muster zu unterscheiden - ein mehrtägiger gleichgerichteter Abwärtstrend
+(HRV sinkend UND Ruhepuls steigend) wiegt deutlich schwerer als ein einzelner schlechter Tageswert
+und sollte die Empfehlung stärker in Richtung Erholung lenken.
 
 Gib eine kurze, konkrete Trainingsempfehlung für heute (1-2 Sätze) und 2-4 kurze
 Begründungs-Stichpunkte, die sich direkt auf die gegebenen Kennzahlen/Infos stützen. Falls eine
@@ -61,6 +71,27 @@ def _weekly_summary_block(cursor, target_date):
         return f"Für die aktuelle Woche ({week_id}) liegt noch keine weekly_summary vor."
     parts = [f"{k}={row[k]}" for k in row.keys() if k != "week_id" and row[k] is not None]
     return ", ".join(parts)
+
+
+def _hrv_rhr_trend_block(cursor, target_date):
+    """HRV-/Ruhepuls-Abweichung (siehe daily_summary.hrv_vs_7d_avg_pct/resting_hr_vs_7d_avg_pct)
+    der letzten HRV_RHR_TREND_WINDOW_DAYS Tage, Tag für Tag - dieselben %-Werte wie im
+    TAGES-KENNZAHLEN-Block für heute, hier zusätzlich als kurzer Verlauf, damit ein mehrtägiges
+    Muster von einem einzelnen Ausreißer unterscheidbar wird."""
+    start = (date.fromisoformat(target_date) - timedelta(days=HRV_RHR_TREND_WINDOW_DAYS - 1)).isoformat()
+    rows = cursor.execute(
+        "SELECT date, hrv_vs_7d_avg_pct, resting_hr_vs_7d_avg_pct FROM daily_summary "
+        "WHERE date >= ? AND date <= ? ORDER BY date ASC",
+        (start, target_date)
+    ).fetchall()
+    if not rows:
+        return f"Keine HRV-/Ruhepuls-Trenddaten für die letzten {HRV_RHR_TREND_WINDOW_DAYS} Tage vorhanden."
+    lines = []
+    for r in rows:
+        hrv = f"{r['hrv_vs_7d_avg_pct']:+.0f}%" if r["hrv_vs_7d_avg_pct"] is not None else "–"
+        rhr = f"{r['resting_hr_vs_7d_avg_pct']:+.0f}%" if r["resting_hr_vs_7d_avg_pct"] is not None else "–"
+        lines.append(f"{r['date']}: HRV {hrv} vs. 7-Tage-Schnitt, Ruhepuls {rhr} vs. 7-Tage-Schnitt")
+    return "\n".join(lines)
 
 
 def _journal_block(cursor, target_date):
@@ -95,6 +126,8 @@ def _gather_context(cursor, target_date, override_value=None):
     parts = [
         "=== TAGES-KENNZAHLEN ===",
         daily_summary_block(cursor, target_date),
+        f"\n=== HRV-/RUHEPULS-TREND (LETZTE {HRV_RHR_TREND_WINDOW_DAYS} TAGE) ===",
+        _hrv_rhr_trend_block(cursor, target_date),
         "\n=== WOCHEN-KENNZAHLEN ===",
         _weekly_summary_block(cursor, target_date),
         "\n=== TAGESJOURNAL ===",

@@ -265,7 +265,7 @@ function SleepOverviewCard({
   if (!overview || overview.sleep_hours == null) {
     return (
       <div className="card">
-        <h3>
+        <h3 className="sleep-overview-title">
           {isToday ? "Letzte Nacht" : "Nacht"}
           <InfoTooltip text={SLEEP_OVERVIEW_TOOLTIP} />
         </h3>
@@ -293,7 +293,7 @@ function SleepOverviewCard({
 
   return (
     <div className="card">
-      <h3>
+      <h3 className="sleep-overview-title">
         {isToday ? "Letzte Nacht" : "Nacht"}
         {evaluationText && <span className="tier-kw"> · {evaluationText}</span>}
         <InfoTooltip text={SLEEP_OVERVIEW_TOOLTIP} />
@@ -906,14 +906,8 @@ function SleepView() {
   return (
     <div className="today-view">
       {error && <p className="error-banner">Fehler: {error}</p>}
-      <div className="performance-row sleep-hero-cards-row">
-        <div className="sleep-card-two-thirds">
-          <SleepOverviewCard date={today} overview={overview} levels={levels} />
-        </div>
-        <div className="sleep-card-one-third">
-          <HabitTrackerCard date={today} />
-        </div>
-      </div>
+      <HabitTrackerCard date={today} />
+      <SleepOverviewCard date={today} overview={overview} levels={levels} />
       {trend && trend.points.length > 1 && (
         <>
           <div className="card">

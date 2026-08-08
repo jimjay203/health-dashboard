@@ -29,7 +29,13 @@ function summaryText(entry: HabitEntry): string {
 // Bildschirmzeit war ursprünglich ein Minuten-Slider - eine Uhrzeit ("wann zuletzt?") ist leichter
 // zu erinnern als eine geschätzte Dauer, die Minuten bis zur Bettzeit lassen sich serverseitig aus
 // sleep_start_local ableiten (siehe backend/routers/sleep.py::_screen_time_gap_minutes).
+//
+// `date` ist nur der initiale Default (heute) - eigener selectedDate-State darunter erlaubt das
+// nachträgliche Erfassen eines verpassten Abends (Datums-Feld unten, gleiches Muster wie
+// JournalCard.tsx), da die abends anfallenden Felder (letzte Bildschirmnutzung/Mahlzeit) morgens
+// oft noch nicht bekannt sind und der Eintrag deshalb leicht mal einen Tag zurückliegt.
 function HabitTrackerCard({ date }: { date: string }) {
+  const [selectedDate, setSelectedDate] = useState(date);
   const [entry, setEntry] = useState<HabitEntry | null>(null);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<HabitEntryInput>(emptyForm());
@@ -37,18 +43,21 @@ function HabitTrackerCard({ date }: { date: string }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Anders als JournalCard.tsx: startet IMMER eingeklappt, auch wenn für den Tag noch nichts
+  // erfasst ist - "Offen" ist deshalb unten ein Button (öffnet das Formular), kein reiner
+  // Status-Text wie im ursprünglichen "sofort aufklappen"-Verhalten.
   useEffect(() => {
     setLoading(true);
-    fetchHabitEntry(date)
+    fetchHabitEntry(selectedDate)
       .then((e) => {
         setEntry(e);
         const filled = e.caffeine_after_noon !== null;
         setForm(filled ? formFromEntry(e) : emptyForm());
-        setEditing(!filled);
+        setEditing(false);
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
-  }, [date]);
+  }, [selectedDate]);
 
   const filled = entry?.caffeine_after_noon != null;
 
@@ -57,7 +66,7 @@ function HabitTrackerCard({ date }: { date: string }) {
     setSaving(true);
     setError(null);
     try {
-      const saved = await saveHabitEntry(date, form);
+      const saved = await saveHabitEntry(selectedDate, form);
       setEntry(saved);
       setEditing(false);
     } catch (err: unknown) {
@@ -85,11 +94,27 @@ function HabitTrackerCard({ date }: { date: string }) {
               <Icon name="edit" /> Erfasst
             </button>
           ) : (
-            <span className="journal-status-pill journal-status-open">
+            <button type="button" className="journal-status-pill journal-status-open" onClick={handleEditClick}>
               <Icon name="schedule" /> Offen
-            </span>
+            </button>
           ))}
       </div>
+
+      {editing && (
+        <div className="journal-date-nav">
+          <input
+            type="date"
+            value={selectedDate}
+            max={date}
+            onChange={(e) => setSelectedDate(e.target.value)}
+          />
+          {selectedDate !== date && (
+            <button type="button" onClick={() => setSelectedDate(date)}>
+              Heute
+            </button>
+          )}
+        </div>
+      )}
 
       {error && <p className="error-banner">Fehler: {error}</p>}
 

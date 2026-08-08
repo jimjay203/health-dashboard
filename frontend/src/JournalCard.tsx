@@ -55,7 +55,13 @@ function SliderField({
 // pages/1_🏠_Home.py-Reihenfolge). Zeigt bei bereits erfasstem Journal eine kompakte
 // Ergebnis-Ansicht statt dauerhaft das Formular offen zu halten (spart Platz), "Bearbeiten"
 // öffnet es wieder mit den gespeicherten Werten vorbefüllt.
+//
+// `date` ist nur der initiale Default (heute) - eigener selectedDate-State darunter erlaubt das
+// nachträgliche Erfassen eines verpassten Tages (Datums-Feld unten), ohne dass ein Eltern-Element
+// dafür ein Datum verwalten müsste. Rein lokale State-Verschiebung, Backend akzeptierte beliebige
+// Daten hier schon immer (GET/PUT /api/daily-journal/{date}).
 function JournalCard({ date }: { date: string }) {
+  const [selectedDate, setSelectedDate] = useState(date);
   const [journal, setJournal] = useState<DailyJournal | null>(null);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<DailyJournalInput>(emptyForm());
@@ -66,7 +72,7 @@ function JournalCard({ date }: { date: string }) {
 
   useEffect(() => {
     setLoading(true);
-    fetchDailyJournal(date)
+    fetchDailyJournal(selectedDate)
       .then((j) => {
         setJournal(j);
         const filled = j.rpe_score !== null;
@@ -75,7 +81,7 @@ function JournalCard({ date }: { date: string }) {
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
-  }, [date]);
+  }, [selectedDate]);
 
   const filled = journal?.rpe_score != null;
 
@@ -85,7 +91,7 @@ function JournalCard({ date }: { date: string }) {
     setError(null);
     setWarning(null);
     try {
-      const result = await saveDailyJournal(date, form);
+      const result = await saveDailyJournal(selectedDate, form);
       setJournal(result.journal);
       setWarning(result.insight_memory_warning);
       setEditing(false);
@@ -135,6 +141,22 @@ function JournalCard({ date }: { date: string }) {
             </span>
           ))}
       </div>
+
+      {editing && (
+        <div className="journal-date-nav">
+          <input
+            type="date"
+            value={selectedDate}
+            max={date}
+            onChange={(e) => setSelectedDate(e.target.value)}
+          />
+          {selectedDate !== date && (
+            <button type="button" onClick={() => setSelectedDate(date)}>
+              Heute
+            </button>
+          )}
+        </div>
+      )}
 
       {error && <p className="error-banner">Fehler: {error}</p>}
       {warning && <p className="journal-warning">{warning}</p>}

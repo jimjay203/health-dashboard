@@ -539,6 +539,30 @@ button.journal-status-pill {
   margin-bottom: 12px;
 }
 
+/* Datums-Navigation (JournalCard.tsx/HabitTrackerCard.tsx) - Default heute, änderbar, um einen
+   verpassten Tag nachträglich zu erfassen. Eigene, kleine Zeile statt im Header verschachtelt, um
+   dort nicht mit der Zusammenfassungszeile/Status-Pille um Platz zu konkurrieren. */
+.journal-date-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.journal-date-nav input[type="date"] {
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text-h);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+}
+
+.journal-date-nav button {
+  font-size: var(--text-sm);
+}
+
 /* Eine Zeile, kein Umbruch - zu langer Inhalt (v.a. bei langen Notizen) wird abgeschnitten statt
    die Kartenhöhe zu sprengen (siehe JournalCard.tsx). */
 .journal-summary-line {
@@ -1747,20 +1771,7 @@ button.journal-status-pill {
 
 /* --- Schlaf-Seite (SleepView.tsx) --- */
 
-/* Letzte Nacht + Habit-Tracker nebeneinander, 3/4 zu 1/4 (flex-grow-Verhältnis statt fester
-   Prozentwerte, damit beide beim Umbruch auf schmalen Bildschirmen normal reagieren - gleiches
-   Prinzip wie .performance-card-narrow/-wide). */
-.sleep-card-two-thirds {
-  flex: 3 1 420px;
-}
-
-.sleep-card-one-third {
-  flex: 1 1 220px;
-  max-width: 260px;
-}
-
-.sleep-card-two-thirds h3,
-.sleep-card-one-third h3 {
+.sleep-overview-title {
   margin-bottom: 12px;
 }
 
@@ -2001,6 +2012,7 @@ button.journal-status-pill {
   color: #f5a623;
   border-color: rgba(245, 166, 35, 0.4);
   background: rgba(245, 166, 35, 0.1);
+  font-size: var(--text-2xs);
 }
 
 
