@@ -1027,6 +1027,15 @@ export function todayIso(): string {
   return formatIso(new Date());
 }
 
+// Tage auf ein bekanntes ISO-Datum addieren/subtrahieren - über explizite Y/M/D-Komponenten statt
+// new Date(isoString) (das würde als UTC-Mitternacht interpretiert, riskiert je nach Zeitzone eine
+// Tagesverschiebung - gleiche Konvention wie formatShortDate/parseLocalIso in SleepView.tsx).
+export function shiftDateIso(isoDate: string, deltaDays: number): string {
+  const d = new Date(Number(isoDate.slice(0, 4)), Number(isoDate.slice(5, 7)) - 1, Number(isoDate.slice(8, 10)));
+  d.setDate(d.getDate() + deltaDays);
+  return formatIso(d);
+}
+
 export function tomorrowIso(): string {
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);

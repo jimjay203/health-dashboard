@@ -12,6 +12,7 @@ import {
 } from "chart.js";
 import {
   todayIso,
+  shiftDateIso,
   formatShortDate,
   formatEnumLabel,
   fetchSleepOverview,
@@ -253,22 +254,51 @@ const SLEEP_OVERVIEW_TOOLTIP =
   "Schlafhistorie an) - kein fixer 8h-Richtwert. Bettzeit-Empfehlung ist Garmins eigener " +
   "Vorschlag fürs optimale Einschlaffenster, nicht selbst berechnet.";
 
+// Pfeile zum Durchklicken vergangener Nächte - "Weiter" bleibt deaktiviert, sobald die aktuellste
+// Nacht (heute) erreicht ist, da es keine zukünftigen Schlafdaten geben kann. Kein Minimum auf der
+// "Zurück"-Seite (einfach "Noch keine Schlafdaten..." falls für den Tag nichts synchronisiert ist).
+function SleepNightNav({ date, onNavigate }: { date: string; onNavigate: (deltaDays: number) => void }) {
+  const isToday = date === todayIso();
+  return (
+    <div className="sleep-night-nav">
+      <button type="button" className="sleep-night-nav-arrow" onClick={() => onNavigate(-1)} title="Vorherige Nacht">
+        <Icon name="chevron_left" />
+      </button>
+      <span className="sleep-night-nav-date">{isToday ? "Heute" : formatShortDate(date)}</span>
+      <button
+        type="button"
+        className="sleep-night-nav-arrow"
+        onClick={() => onNavigate(1)}
+        disabled={isToday}
+        title="Nächste Nacht"
+      >
+        <Icon name="chevron_right" />
+      </button>
+    </div>
+  );
+}
+
 function SleepOverviewCard({
   date,
   overview,
   levels,
+  onNavigate,
 }: {
   date: string;
   overview: SleepOverview | null;
   levels: SleepLevels | null;
+  onNavigate: (deltaDays: number) => void;
 }) {
   const isToday = date === todayIso();
   if (!overview || overview.sleep_hours == null) {
     return (
       <div className="card">
         <h3 className="sleep-overview-title">
-          {isToday ? "Letzte Nacht" : "Nacht"}
-          <InfoTooltip text={SLEEP_OVERVIEW_TOOLTIP} />
+          <span>
+            {isToday ? "Letzte Nacht" : "Nacht"}
+            <InfoTooltip text={SLEEP_OVERVIEW_TOOLTIP} />
+          </span>
+          <SleepNightNav date={date} onNavigate={onNavigate} />
         </h3>
         <p className="week-rationale">Noch keine Schlafdaten für diese Nacht synchronisiert.</p>
       </div>
@@ -295,9 +325,12 @@ function SleepOverviewCard({
   return (
     <div className="card">
       <h3 className="sleep-overview-title">
-        {isToday ? "Letzte Nacht" : "Nacht"}
-        {evaluationText && <span className="tier-kw"> · {evaluationText}</span>}
-        <InfoTooltip text={SLEEP_OVERVIEW_TOOLTIP} />
+        <span>
+          {isToday ? "Letzte Nacht" : "Nacht"}
+          {evaluationText && <span className="tier-kw"> · {evaluationText}</span>}
+          <InfoTooltip text={SLEEP_OVERVIEW_TOOLTIP} />
+        </span>
+        <SleepNightNav date={date} onNavigate={onNavigate} />
       </h3>
 
       <div className="sleep-card-body-row">
@@ -806,6 +839,7 @@ function SleepCorrelations({
 
 function SleepView() {
   const today = todayIso();
+  const [selectedNightDate, setSelectedNightDate] = useState(today);
   const [overview, setOverview] = useState<SleepOverview | null>(null);
   const [levels, setLevels] = useState<SleepLevels | null>(null);
   const [trend, setTrend] = useState<SleepTrend | null>(null);
@@ -815,17 +849,29 @@ function SleepView() {
   const [trendInsightLoading, setTrendInsightLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Eigenständig von trend/Korrelationen (die bleiben immer auf den letzten 28 Tagen bis heute) -
+  // nur die "Letzte Nacht"-Kachel wandert per Pfeilen durch die Vergangenheit.
   useEffect(() => {
-    fetchSleepOverview(today)
+    fetchSleepOverview(selectedNightDate)
       .then(setOverview)
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
-    fetchSleepLevels(today)
+    fetchSleepLevels(selectedNightDate)
       .then(setLevels)
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+  }, [selectedNightDate]);
+
+  useEffect(() => {
     fetchSleepTrend(28)
       .then(setTrend)
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   }, [today]);
+
+  function handleNavigateNight(deltaDays: number) {
+    setSelectedNightDate((current) => {
+      const next = shiftDateIso(current, deltaDays);
+      return next > today ? today : next;
+    });
+  }
 
   // Erst anfragen, sobald genug Trend-Daten für die Korrelations-/Trend-Charts da sind (gleiche
   // Bedingung wie unten beim Rendern) - reiner Cache-Read (kein automatisches Generieren mehr,
@@ -848,7 +894,7 @@ function SleepView() {
     <div className="today-view">
       {error && <p className="error-banner">Fehler: {error}</p>}
       <HabitTrackerCard date={today} />
-      <SleepOverviewCard date={today} overview={overview} levels={levels} />
+      <SleepOverviewCard date={selectedNightDate} overview={overview} levels={levels} onNavigate={handleNavigateNight} />
       {trend && trend.points.length > 1 && (
         <>
           <div className="card">
