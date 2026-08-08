@@ -20,7 +20,8 @@ from garmin_service import fetch_and_store_garmin_data
 from garmin_activities import sync_activity_list, sync_activity_details
 from daily_recommendation import generate_daily_recommendation
 from weekly_planner import generate_weekly_plan, get_week_plan
-from db import get_connection, upsert_daily_metric
+from db import get_connection, upsert_daily_metric, log_sync_event
+from sync_activity import set_garmin_syncing
 
 AUTO_SYNC_START_TIME = dt_time(6, 0)
 AUTO_SYNC_CUTOFF_TIME = dt_time(12, 0)
@@ -34,6 +35,10 @@ AUTO_SYNC_CHECK_INTERVAL_SECONDS = 25 * 60
 # dazu, dieselben Standardwerte wie die manuellen Formularfelder in DataSyncSettings.tsx.
 AUTO_SYNC_ACTIVITY_LIST_LIMIT = 20
 AUTO_SYNC_ACTIVITY_DETAILS_MAX_COUNT = 5
+
+
+def _log_garmin_event(sync_type, status, detail=None):
+    log_sync_event("garmin", sync_type, status, detail)
 
 
 def sync_activities_once(
@@ -152,6 +157,7 @@ async def run_auto_sync_loop(
     client_factory=get_garmin_client,
     recommendation_fn=generate_daily_recommendation,
     activities_sync_fn=sync_activities_once,
+    log_fn=_log_garmin_event,
     now_fn=datetime.now,
 ):
     """Eine Tages-Schleife: wartet bis start_time, prüft dann im interval_seconds-Takt bis
@@ -171,32 +177,42 @@ async def run_auto_sync_loop(
 
     client = None
     while now_fn().time() < cutoff_time:
+        # set_garmin_syncing steuert nur die TopBar-Pille (Live-Feedback "läuft gerade was?") -
+        # umschließt eine ganze Iteration (Check + ggf. den daraus ausgelösten vollen Sync), nicht
+        # einzelne Aufrufe, damit die Pille für die gesamte tatsächliche Sync-Aktivität leuchtet.
+        set_garmin_syncing(True)
         try:
-            if client is None:
-                client = await asyncio.to_thread(client_factory)
-            found, error = await asyncio.to_thread(check_fn, client, target_date)
-        except GarminConnectTooManyRequestsError as e:
-            _mark_check(target_date, False, error=f"429: {e}")
-            return "rate_limited"
+            try:
+                if client is None:
+                    client = await asyncio.to_thread(client_factory)
+                found, error = await asyncio.to_thread(check_fn, client, target_date)
+            except GarminConnectTooManyRequestsError as e:
+                _mark_check(target_date, False, error=f"429: {e}")
+                log_fn("check", "fehler", f"429: {e}")
+                return "rate_limited"
 
-        _mark_check(target_date, found, error=error)
-        if found:
-            await asyncio.to_thread(sync_fn, target_date, client)
-            _mark_sync_completed(target_date)
-            # Best effort: die Heute-Ansicht (siehe daily_recommendation.py) hat einen eigenen
-            # Lazy-Fallback für fehlende/fehlgeschlagene Empfehlungen - ein Gemini-Fehler hier darf
-            # den bereits erfolgreichen Sync-Status daher nicht kippen, nur geloggt werden.
-            try:
-                await asyncio.to_thread(recommendation_fn, target_date)
-            except Exception as e:
-                print(f"⚠️  auto_sync: Empfehlungsgenerierung fehlgeschlagen: {e}")
-            # Best effort, gleiches Muster: nutzt denselben bereits authentifizierten Client,
-            # ein Fehler hier darf den bereits erfolgreichen Sync-Status nicht kippen.
-            try:
-                await asyncio.to_thread(activities_sync_fn, client)
-            except Exception as e:
-                print(f"⚠️  auto_sync: Aktivitäten-Sync fehlgeschlagen: {e}")
-            return "completed"
+            _mark_check(target_date, found, error=error)
+            log_fn("check", "gefunden" if found else "nicht gefunden", error)
+            if found:
+                await asyncio.to_thread(sync_fn, target_date, client)
+                _mark_sync_completed(target_date)
+                log_fn("auto", "abgeschlossen", f"Datum: {target_date}")
+                # Best effort: die Heute-Ansicht (siehe daily_recommendation.py) hat einen eigenen
+                # Lazy-Fallback für fehlende/fehlgeschlagene Empfehlungen - ein Gemini-Fehler hier darf
+                # den bereits erfolgreichen Sync-Status daher nicht kippen, nur geloggt werden.
+                try:
+                    await asyncio.to_thread(recommendation_fn, target_date)
+                except Exception as e:
+                    print(f"⚠️  auto_sync: Empfehlungsgenerierung fehlgeschlagen: {e}")
+                # Best effort, gleiches Muster: nutzt denselben bereits authentifizierten Client,
+                # ein Fehler hier darf den bereits erfolgreichen Sync-Status nicht kippen.
+                try:
+                    await asyncio.to_thread(activities_sync_fn, client)
+                except Exception as e:
+                    print(f"⚠️  auto_sync: Aktivitäten-Sync fehlgeschlagen: {e}")
+                return "completed"
+        finally:
+            set_garmin_syncing(False)
 
         await asyncio.sleep(interval_seconds)
 

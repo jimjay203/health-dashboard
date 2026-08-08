@@ -100,23 +100,18 @@ def get_body_trend(days: int = 90) -> BodyTrendResponse:
 
 class TrendInsightResponse(BaseModel):
     date: str
-    insight_text: str
-    generated_at: str
+    insight_text: str | None = None
+    generated_at: str | None = None
 
 
 @router.get("/trend-insight", response_model=TrendInsightResponse)
 def get_trend_insight() -> TrendInsightResponse:
-    """Cache-dann-lazy-generieren, gleiches Muster wie backend/routers/sleep.py."""
+    """Reines Cache-Lesen, kein automatisches Generieren mehr (Nutzer-Vorgabe vom 2026-08-08)."""
     today = date.today().isoformat()
     cached = get_cached_trend_insight(today)
     if cached:
         return TrendInsightResponse(**cached)
-    try:
-        points = body_composition.get_body_trend(90)["points"]
-        fresh = generate_trend_insight(today, points)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Einordnung konnte nicht generiert werden: {e}")
-    return TrendInsightResponse(**fresh)
+    return TrendInsightResponse(date=today)
 
 
 @router.post("/trend-insight/regenerate", response_model=TrendInsightResponse)

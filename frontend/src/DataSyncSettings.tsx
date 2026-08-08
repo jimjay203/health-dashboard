@@ -13,11 +13,14 @@ import {
   syncActivitiesList,
   startActivityDetailsSync,
   fetchActivityDetailsStatus,
+  fetchGarminSyncLog,
+  fetchWithingsSyncLog,
   type BackfillStatus,
   type ActivitiesSummary,
   type ActivityRow,
   type ActivityDetailsStatus,
   type WithingsAutoSyncStatus,
+  type SyncLogEntry,
 } from "./api";
 
 const POLL_INTERVAL_MS = 2000;
@@ -469,6 +472,79 @@ function ActivitiesSection() {
   );
 }
 
+const SYNC_TYPE_LABEL: Record<SyncLogEntry["sync_type"], string> = {
+  check: "Schlafdaten-Check",
+  auto: "Automatischer Sync",
+  manual: "Manueller Sync",
+};
+
+// Chronologischer Verlauf der Sync-Auslöser (siehe db.py::sync_log) - eine Zeile pro Lauf, nicht
+// aggregiert pro Tag wie der bestehende Sync-Status oben in der TopBar. Einmaliges Laden reicht
+// (kein Live-Fortschritt wie bei Backfill) - "Aktualisieren"-Button, da im Hintergrund jederzeit
+// neue Einträge durch die Auto-Sync-Tasks dazukommen können. Generisch über den Provider (Garmin
+// hat zusätzlich "check"-Einträge, Withings nur "auto"/"manual" - SYNC_TYPE_LABEL deckt beide ab).
+function SyncLogSection({
+  title,
+  description,
+  fetchFn,
+}: {
+  title: string;
+  description: string;
+  fetchFn: (limit?: number) => Promise<SyncLogEntry[]>;
+}) {
+  const [entries, setEntries] = useState<SyncLogEntry[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  function reload() {
+    setLoading(true);
+    fetchFn(50)
+      .then((res) => {
+        setEntries(res);
+        setError(null);
+      })
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(reload, []);
+
+  return (
+    <div className="data-sync-section">
+      <h4>{title}</h4>
+      <p className="week-rationale">{description}</p>
+      <button type="button" className="data-sync-toggle-table" onClick={reload} disabled={loading}>
+        {loading ? "Lädt…" : "Aktualisieren"}
+      </button>
+      {error && <p className="error-banner">{error}</p>}
+      {entries.length === 0 ? (
+        <p className="week-rationale">Noch keine Einträge.</p>
+      ) : (
+        <table className="club-slots-table">
+          <thead>
+            <tr>
+              <th>Zeitpunkt</th>
+              <th>Typ</th>
+              <th>Status</th>
+              <th>Detail</th>
+            </tr>
+          </thead>
+          <tbody>
+            {entries.map((e) => (
+              <tr key={e.id}>
+                <td>{formatDateTime(e.timestamp)}</td>
+                <td>{SYNC_TYPE_LABEL[e.sync_type] ?? e.sync_type}</td>
+                <td>{e.status}</td>
+                <td>{e.detail ?? "–"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 // Einmaliger Voll-Import der kompletten Withings-Historie (siehe
 // withings_service.py::fetch_full_withings_history) - kein Datumsfeld wie bei DaySyncSection oben,
 // da Withings ohne startdate/enddate paginiert die gesamte Historie liefert (bewusst blockierend,
@@ -513,17 +589,35 @@ function WithingsFullHistorySection() {
   );
 }
 
-// Bewusst KEINE Portierung der Streamlit-API-Exploration (Tier-1/2-Testabruf) - das ist ein
-// Debug-/Explorations-Werkzeug, keine Sync-Funktion, und bleibt vorerst nur in Streamlit verfügbar.
-function DataSyncSettings() {
+// Drei nach Plattform/Thema getrennte Karten statt einer einzigen, gemischten "Daten-
+// Synchronisation"-Karte (vorher: Garmin/Withings/Allgemein flach durcheinander, siehe Git-
+// Historie) - jede Karte bündelt alles zu genau einer Datenquelle, in der Reihenfolge
+// Sync-jetzt-Formular -> Historie/Nachhol-Import -> Verlauf.
+
+function GarminSyncSettings() {
   return (
     <div className="card data-sync-card">
-      <h3>Daten-Synchronisation</h3>
+      <h3>Garmin</h3>
       <DaySyncSection
         title="Garmin Connect Sync"
         caption="Synchronisiert alle Garmin-Kern-/Erweiterungsdaten für ein beliebiges Datum (ergänzt die automatische/tägliche Sync-Pille oben, die nur den heutigen Tag abdeckt)."
         onSync={syncGarminDay}
       />
+      <BackfillSection />
+      <ActivitiesSection />
+      <SyncLogSection
+        title="Garmin-Sync-Verlauf"
+        description="Chronologischer Verlauf der letzten Läufe: Schlafdaten-Check (automatischer Poll-Takt), der daraus ausgelöste automatische Sync, und manuell angestoßene Syncs (TopBar-Button/Formular oben/Backfill)."
+        fetchFn={fetchGarminSyncLog}
+      />
+    </div>
+  );
+}
+
+function WithingsSyncSettings() {
+  return (
+    <div className="card data-sync-card">
+      <h3>Withings</h3>
       <WithingsAutoSyncStatusSection />
       <DaySyncSection
         title="Withings Sync"
@@ -531,11 +625,27 @@ function DataSyncSettings() {
         onSync={syncWithingsDay}
       />
       <WithingsFullHistorySection />
-      <BackfillSection />
-      <ActivitiesSection />
+      <SyncLogSection
+        title="Withings-Sync-Verlauf"
+        description="Chronologischer Verlauf der letzten Läufe: stündlicher automatischer Token-Keepalive-Sync und manuell angestoßene Syncs (Formular/Voll-Historie oben)."
+        fetchFn={fetchWithingsSyncLog}
+      />
+    </div>
+  );
+}
+
+// Bewusst keine eigene Plattform - reine lokale Berechnung auf bereits synchronisierten Daten
+// (kein Garmin-/Withings-API-Zugriff), deshalb eigene "Allgemein"-Karte statt in einer der beiden
+// Plattform-Karten zu landen.
+function GeneralSyncSettings() {
+  return (
+    <div className="card data-sync-card">
+      <h3>Allgemein</h3>
       <RecomputeSummarySection />
     </div>
   );
 }
 
-export default DataSyncSettings;
+// Bewusst KEINE Portierung der Streamlit-API-Exploration (Tier-1/2-Testabruf) - das ist ein
+// Debug-/Explorations-Werkzeug, keine Sync-Funktion, und bleibt vorerst nur in Streamlit verfügbar.
+export { GarminSyncSettings, WithingsSyncSettings, GeneralSyncSettings };

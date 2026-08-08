@@ -78,6 +78,13 @@ async def test_orchestration_with_fakes():
         # versuchen, sync_activity_list()/sync_activity_details() mit dem FAKE_CLIENT aufzurufen.
         activities_sync_calls.append(client)
 
+    log_calls = []
+
+    def fake_log(sync_type, status, detail=None):
+        # Kein echter garmin_sync_log-Eintrag hier - ohne dieses Fake würde jeder Testlauf den
+        # Sync-Verlauf mit Einträgen für das erfundene TEST_DATE verschmutzen.
+        log_calls.append((sync_type, status, detail))
+
     fake_now = datetime.combine(date.today(), dt_time(7, 0))
 
     def fake_now_fn():
@@ -93,6 +100,7 @@ async def test_orchestration_with_fakes():
         client_factory=fake_client_factory,
         recommendation_fn=fake_recommendation,
         activities_sync_fn=fake_activities_sync,
+        log_fn=fake_log,
         now_fn=fake_now_fn,
     )
 
@@ -101,12 +109,19 @@ async def test_orchestration_with_fakes():
     print("Sync-Aufrufe:", sync_calls)
     print("Empfehlungs-Aufrufe:", recommendation_calls)
     print("Aktivitäten-Sync-Aufrufe:", activities_sync_calls)
+    print("Log-Aufrufe:", log_calls)
 
     assert status == "completed"
     assert len(check_calls) == 3
     assert sync_calls == [TEST_DATE]
     assert recommendation_calls == [TEST_DATE]
     assert activities_sync_calls == ["FAKE_CLIENT"]
+    assert log_calls == [
+        ("check", "nicht gefunden", None),
+        ("check", "nicht gefunden", None),
+        ("check", "gefunden", None),
+        ("auto", "abgeschlossen", f"Datum: {TEST_DATE}"),
+    ]
 
     db_status = get_status(TEST_DATE)
     print("DB-Status:", db_status)

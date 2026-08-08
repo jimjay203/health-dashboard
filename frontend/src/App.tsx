@@ -11,17 +11,22 @@ import InsightMemoryView from "./InsightMemoryView";
 import ClubSlotsSettings from "./ClubSlotsSettings";
 import PerformanceGoalsSettings from "./PerformanceGoalsSettings";
 import BodyMeasurementsSettings from "./BodyMeasurementsSettings";
-import DataSyncSettings from "./DataSyncSettings";
+import { GarminSyncSettings, WithingsSyncSettings, GeneralSyncSettings } from "./DataSyncSettings";
 import { useTheme } from "./theme";
 import { useSidebarCollapsed } from "./sidebarCollapsed";
 
+// Zwei Themenblöcke: erst die inhaltliche Trainingskonfiguration (Vereinstermine/Ziele/Körpermaße),
+// dann die Daten-Synchronisation, dort wiederum nach Plattform getrennt (Garmin/Withings/Allgemein)
+// statt einer einzigen gemischten Karte.
 function SettingsView() {
   return (
     <div className="today-view">
       <ClubSlotsSettings />
       <PerformanceGoalsSettings />
       <BodyMeasurementsSettings />
-      <DataSyncSettings />
+      <GarminSyncSettings />
+      <WithingsSyncSettings />
+      <GeneralSyncSettings />
     </div>
   );
 }

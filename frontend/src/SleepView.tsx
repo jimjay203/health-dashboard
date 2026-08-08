@@ -21,6 +21,7 @@ import {
   regenerateSleepCorrelationsInsight,
   fetchSleepTrendInsight,
   regenerateSleepTrendInsight,
+  formatGeneratedAt,
   type SleepOverview,
   type SleepTrend,
   type SleepTrendPoint,
@@ -886,7 +887,8 @@ function SleepView() {
   }, [today]);
 
   // Erst anfragen, sobald genug Trend-Daten für die Korrelations-/Trend-Charts da sind (gleiche
-  // Bedingung wie unten beim Rendern) - vermeidet einen Gemini-Aufruf ohne sinnvolle Datenbasis.
+  // Bedingung wie unten beim Rendern) - reiner Cache-Read (kein automatisches Generieren mehr,
+  // siehe backend/routers/sleep.py), trotzdem erst sinnvoll, sobald die Karte selbst etwas zeigt.
   useEffect(() => {
     if (!trend || trend.points.length <= 1) return;
     setCorrelationsInsightLoading(true);
@@ -917,18 +919,22 @@ function SleepView() {
           <div className="card">
             <h3>
               Trend (28 Tage)
-              {trendInsight && (
-                <InsightRegenerateButton regenerateFn={regenerateSleepTrendInsight} onRegenerated={setTrendInsight} />
-              )}
+              <InsightRegenerateButton regenerateFn={regenerateSleepTrendInsight} onRegenerated={setTrendInsight} />
             </h3>
             <div className="sleep-trend-row">
               <div className="sleep-insight-col">
-                {trendInsightLoading && !trendInsight ? (
-                  <p className="week-rationale">Lade Einordnung…</p>
-                ) : trendInsight ? (
-                  <p className="sleep-insight-text">{trendInsight.insight_text}</p>
+                {trendInsightLoading ? (
+                  <p className="week-rationale">Lade…</p>
+                ) : trendInsight?.insight_text ? (
+                  <>
+                    <p className="sleep-insight-text">
+                      <Icon name="auto_awesome" className="ai-text-icon" />
+                      {trendInsight.insight_text}
+                    </p>
+                    <p className="ai-text-timestamp">Erstellt: {formatGeneratedAt(trendInsight.generated_at)}</p>
+                  </>
                 ) : (
-                  <p className="week-rationale">Keine Einordnung verfügbar.</p>
+                  <p className="week-rationale">Noch nicht generiert - über den Pfeil oben erzeugen.</p>
                 )}
               </div>
               <div className="hrv-trend-panel">
@@ -942,21 +948,25 @@ function SleepView() {
             <h3>
               Korrelationen
               <InfoTooltip text="Rein beobachtend, keine statistische Signifikanzprüfung - bei wenigen Nächten können einzelne Ausreißer das Bild stark verzerren." />
-              {correlationsInsight && (
-                <InsightRegenerateButton
-                  regenerateFn={regenerateSleepCorrelationsInsight}
-                  onRegenerated={setCorrelationsInsight}
-                />
-              )}
+              <InsightRegenerateButton
+                regenerateFn={regenerateSleepCorrelationsInsight}
+                onRegenerated={setCorrelationsInsight}
+              />
             </h3>
             <div className="sleep-correlations-row">
               <div className="sleep-insight-col">
-                {correlationsInsightLoading && !correlationsInsight ? (
-                  <p className="week-rationale">Lade Einordnung…</p>
-                ) : correlationsInsight ? (
-                  <p className="sleep-insight-text">{correlationsInsight.insight_text}</p>
+                {correlationsInsightLoading ? (
+                  <p className="week-rationale">Lade…</p>
+                ) : correlationsInsight?.insight_text ? (
+                  <>
+                    <p className="sleep-insight-text">
+                      <Icon name="auto_awesome" className="ai-text-icon" />
+                      {correlationsInsight.insight_text}
+                    </p>
+                    <p className="ai-text-timestamp">Erstellt: {formatGeneratedAt(correlationsInsight.generated_at)}</p>
+                  </>
                 ) : (
-                  <p className="week-rationale">Keine Einordnung verfügbar.</p>
+                  <p className="week-rationale">Noch nicht generiert - über den Pfeil oben erzeugen.</p>
                 )}
               </div>
               <div className="sleep-correlations-grid">

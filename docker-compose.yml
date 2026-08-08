@@ -19,6 +19,11 @@ services:
       - ./withings_tokens:/root/.withings_api
     environment:
       - PYTHONUNBUFFERED=1
+      # Ohne das läuft der Container in UTC (Debian-Basisimage-Default) - jeder datetime.now()-
+      # Aufruf im ganzen Backend (Zeitstempel in Sync-Verlauf, Journal, Insight-Timestamps, ...)
+      # wäre dann 1-2h (je nach Sommer-/Winterzeit) hinter der echten lokalen Zeit zurück. Europe/
+      # Berlin statt eines festen Offsets, damit die Sommerzeit-Umstellung automatisch stimmt.
+      - TZ=Europe/Berlin
     restart: unless-stopped
 
   # Schritt 1 des FastAPI+React-Rebuilds (siehe PROJECT_OVERVIEW.md) - läuft parallel zum
@@ -40,4 +45,5 @@ services:
       - ./withings_tokens:/root/.withings_api
     environment:
       - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
     restart: unless-stopped

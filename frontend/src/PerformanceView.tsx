@@ -15,6 +15,7 @@ import {
   fetchPerformanceGoals,
   fetchPerformanceGoalsInsight,
   regeneratePerformanceGoalsInsight,
+  formatGeneratedAt,
   fetchRacePredictions,
   fetchCyclingPrediction,
   fetchSwimDiagnostics,
@@ -688,10 +689,18 @@ function GoalsInsightCard({
           <InsightRegenerateButton regenerateFn={regeneratePerformanceGoalsInsight} onRegenerated={onRegenerated} />
         )}
       </h3>
-      {loading && !insight ? (
-        <p className="week-rationale">Lade Einschätzung…</p>
+      {loading ? (
+        <p className="week-rationale">Lade…</p>
+      ) : insight?.insight_text ? (
+        <>
+          <p className="sleep-insight-text">
+            <Icon name="auto_awesome" className="ai-text-icon" />
+            {insight.insight_text}
+          </p>
+          <p className="ai-text-timestamp">Erstellt: {formatGeneratedAt(insight.generated_at)}</p>
+        </>
       ) : insight ? (
-        <p className="sleep-insight-text">{insight.insight_text}</p>
+        <p className="week-rationale">Noch nicht generiert - über den Pfeil oben erzeugen.</p>
       ) : (
         <p className="week-rationale">
           Noch keine Leistungsziele hinterlegt (Einstellungen &rarr; Leistungsziele).

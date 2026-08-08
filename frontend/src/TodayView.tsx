@@ -4,6 +4,8 @@ import {
   fetchReadinessOverview,
   fetchRecommendation,
   postOverride,
+  regenerateRecommendation,
+  formatGeneratedAt,
   type ReadinessOverview,
   type Recommendation,
   type OverrideValue,
@@ -12,6 +14,48 @@ import HrvCard from "./HrvCard";
 import JournalCard from "./JournalCard";
 import ReadinessGauge from "./ReadinessGauge";
 import Icon from "./Icon";
+
+// Erzwingt eine Neu-Generierung einer Gemini-Einschätzung unabhängig vom Tages-Cache - gleiches
+// Muster/gleiche Styles (.tier-regenerate-button, "spinning") wie die gleichnamige lokale
+// Komponente in SleepView.tsx/BodyView.tsx/PerformanceView.tsx (dort jeweils separat dupliziert
+// statt geteilt, hier aus Konsistenzgründen genauso gehalten).
+function InsightRegenerateButton<T>({
+  regenerateFn,
+  onRegenerated,
+}: {
+  regenerateFn: () => Promise<T>;
+  onRegenerated: (result: T) => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleClick() {
+    setLoading(true);
+    setError(null);
+    try {
+      onRegenerated(await regenerateFn());
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        className={`tier-regenerate-button${loading ? " spinning" : ""}`}
+        onClick={handleClick}
+        disabled={loading}
+        title="Neu generieren"
+      >
+        <Icon name="refresh" />
+      </button>
+      {error && <p className="tier-regenerate-warning">{error}</p>}
+    </>
+  );
+}
 
 // Garmins feedback_short ist ein SCREAMING_SNAKE_CASE-Kurzcode - anhand echter synchronisierter
 // Werte übersetzt (12 beobachtete Ausprägungen, siehe Ground-Truth-Check), nicht geraten. UNKNOWN
@@ -149,10 +193,18 @@ function RecommendationHeadline({
   return (
     <div className="recommendation-panel">
       <div className="recommendation-label">Empfehlung heute</div>
-      {recommendation ? (
-        <p className={`recommendation-text${overriding ? " is-updating" : ""}`}>{recommendation.recommendation_text}</p>
+      {loading ? (
+        <p>Lade…</p>
+      ) : recommendation?.recommendation_text ? (
+        <>
+          <p className={`recommendation-text${overriding ? " is-updating" : ""}`}>
+            <Icon name="auto_awesome" className="ai-text-icon" />
+            {recommendation.recommendation_text}
+          </p>
+          <p className="ai-text-timestamp">Erstellt: {formatGeneratedAt(recommendation.generated_at)}</p>
+        </>
       ) : (
-        <p>{loading ? "Lade Empfehlung…" : "Keine Empfehlung verfügbar."}</p>
+        <p>Noch nicht generiert - über den Pfeil oben erzeugen.</p>
       )}
     </div>
   );
@@ -169,7 +221,7 @@ function RecommendationDetails({
 }) {
   return (
     <>
-      {recommendation && (
+      {recommendation?.reasoning_bullets && (
         <ul className={`reasoning-bullets${overriding ? " is-updating" : ""}`}>
           {recommendation.reasoning_bullets.map((bullet, i) => (
             <li key={i}>{bullet}</li>
@@ -204,19 +256,26 @@ function ReadinessCard({
   loading,
   overriding,
   onOverride,
+  onRecommendationRegenerated,
 }: {
   overview: ReadinessOverview | null;
   recommendation: Recommendation | null;
   loading: boolean;
   overriding: boolean;
   onOverride: (value: OverrideValue) => void;
+  onRecommendationRegenerated: (result: Recommendation) => void;
 }) {
   const feedback = translateFeedbackShort(overview?.feedback_short ?? null);
+  const today = todayIso();
   return (
     <div className="card performance-card performance-card-narrow">
       <h3>
         Trainingsbereitschaft
         {feedback && <span className="tier-kw"> · {feedback}</span>}
+        <InsightRegenerateButton
+          regenerateFn={() => regenerateRecommendation(today)}
+          onRegenerated={onRecommendationRegenerated}
+        />
       </h3>
       <div className="readiness-card-top">
         <div className="readiness-card-gauge-col">
@@ -271,6 +330,7 @@ function TodayView() {
           loading={recommendationLoading}
           overriding={overriding}
           onOverride={handleOverride}
+          onRecommendationRegenerated={setRecommendation}
         />
         <HrvCard overview={overview} />
       </div>

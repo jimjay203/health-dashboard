@@ -16,7 +16,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from db import get_connection
+from db import get_connection, log_sync_event, list_sync_log
 from garmin_auth import get_garmin_client
 from garmin_service import fetch_and_store_garmin_data
 from garmin_backfill import run_backfill
@@ -25,6 +25,7 @@ from withings_service import fetch_and_store_withings_data, fetch_full_withings_
 from withings_auth import get_token_status
 from withings_auto_sync import get_status as get_withings_auto_sync_status
 from daily_summary import recompute_summary_range
+from sync_activity import set_garmin_syncing, set_withings_syncing
 
 router = APIRouter(prefix="/api/data-sync", tags=["data-sync"])
 
@@ -34,6 +35,32 @@ def _validate_date(date_str):
         return datetime.strptime(date_str, "%Y-%m-%d").date()
     except ValueError:
         raise HTTPException(status_code=400, detail="Datum muss im Format YYYY-MM-DD sein.")
+
+
+# --- Sync-Verlauf (siehe db.py::sync_log/log_sync_event) - chronologische Liste je Provider.
+# Garmin: "check" (Schlafdaten-Verfügbarkeits-Check, siehe auto_sync.py::run_auto_sync_loop),
+# "auto" (der daraus ausgelöste volle Tages-Sync), "manual" (TopBar-Button/Einstellungen-Formular).
+# Withings: nur "auto" (stündlicher Token-Keepalive-Sync, siehe withings_auto_sync.py) und "manual"
+# (Einstellungen-Formular/Voll-Historie-Button) - kein eigener Verfügbarkeits-Check-Schritt wie bei
+# Garmin. Eine Zeile PRO LAUF, nicht aggregiert pro Tag.
+
+class SyncLogEntry(BaseModel):
+    id: int
+    timestamp: str
+    provider: str
+    sync_type: str
+    status: str
+    detail: str | None = None
+
+
+@router.get("/garmin-sync-log", response_model=list[SyncLogEntry])
+def get_garmin_sync_log(limit: int = 50) -> list[SyncLogEntry]:
+    return [SyncLogEntry(**entry) for entry in list_sync_log("garmin", limit)]
+
+
+@router.get("/withings-sync-log", response_model=list[SyncLogEntry])
+def get_withings_sync_log(limit: int = 50) -> list[SyncLogEntry]:
+    return [SyncLogEntry(**entry) for entry in list_sync_log("withings", limit)]
 
 
 # --- Einzel-Tages-Sync (Garmin + Withings) für ein beliebiges Datum ---
@@ -48,22 +75,32 @@ class DaySyncResponse(BaseModel):
 @router.post("/garmin-day/{date_str}", response_model=DaySyncResponse)
 async def sync_garmin_day(date_str: str) -> DaySyncResponse:
     _validate_date(date_str)
+    set_garmin_syncing(True)
     try:
         client = await asyncio.to_thread(get_garmin_client)
         await asyncio.to_thread(fetch_and_store_garmin_data, date_str, client)
+        log_sync_event("garmin", "manual", "abgeschlossen", f"Einstellungen-Formular, Datum: {date_str}")
         return DaySyncResponse(success=True)
     except Exception as e:
+        log_sync_event("garmin", "manual", "fehler", f"Einstellungen-Formular, Datum: {date_str}: {e}")
         return DaySyncResponse(success=False, error=str(e))
+    finally:
+        set_garmin_syncing(False)
 
 
 @router.post("/withings-day/{date_str}", response_model=DaySyncResponse)
 async def sync_withings_day(date_str: str) -> DaySyncResponse:
     _validate_date(date_str)
+    set_withings_syncing(True)
     try:
         count = await asyncio.to_thread(fetch_and_store_withings_data, date_str)
+        log_sync_event("withings", "manual", "abgeschlossen", f"Einstellungen-Formular, Datum: {date_str}")
         return DaySyncResponse(success=True, measurement_count=count)
     except Exception as e:
+        log_sync_event("withings", "manual", "fehler", f"Einstellungen-Formular, Datum: {date_str}: {e}")
         return DaySyncResponse(success=False, error=str(e))
+    finally:
+        set_withings_syncing(False)
 
 
 @router.post("/withings-full-history", response_model=DaySyncResponse)
@@ -73,11 +110,16 @@ async def sync_withings_full_history() -> DaySyncResponse:
     wie Backfill unten: Withings liefert die ganze Historie über wenige paginierte Aufrufe (kein
     day-by-day-Loop mit Drosselungspausen wie bei Garmin nötig), das passt in ein normales
     Request-Timeout."""
+    set_withings_syncing(True)
     try:
         count = await asyncio.to_thread(fetch_full_withings_history)
+        log_sync_event("withings", "manual", "abgeschlossen", "Voll-Historie")
         return DaySyncResponse(success=True, measurement_count=count)
     except Exception as e:
+        log_sync_event("withings", "manual", "fehler", f"Voll-Historie: {e}")
         return DaySyncResponse(success=False, error=str(e))
+    finally:
+        set_withings_syncing(False)
 
 
 class WithingsAutoSyncStatusResponse(BaseModel):
@@ -123,10 +165,12 @@ async def _run_backfill_task(start, end):
         running=True, current_date=None, success_count=0, error_count=0,
         total=(end - start).days + 1, stopped_early=False, last_error=None,
     )
+    set_garmin_syncing(True)
     try:
         client = await asyncio.to_thread(get_garmin_client)
     except Exception as e:
         _backfill_state.update(running=False, last_error=str(e))
+        set_garmin_syncing(False)
         return
 
     def on_progress(current_date, status, success_count, error_count, total, error_detail=None):
@@ -146,8 +190,15 @@ async def _run_backfill_task(start, end):
         _backfill_state.update(
             running=False, success_count=success_count, error_count=error_count, stopped_early=stopped_early,
         )
+        log_sync_event(
+            "garmin", "manual", "abgeschlossen",
+            f"Backfill {start.isoformat()}–{end.isoformat()}: {success_count} erfolgreich, {error_count} Fehler"
+        )
     except Exception as e:
         _backfill_state.update(running=False, last_error=str(e))
+        log_sync_event("garmin", "manual", "fehler", f"Backfill {start.isoformat()}–{end.isoformat()}: {e}")
+    finally:
+        set_garmin_syncing(False)
 
 
 class BackfillRequest(BaseModel):

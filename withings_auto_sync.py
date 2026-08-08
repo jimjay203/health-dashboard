@@ -16,6 +16,8 @@ import asyncio
 from datetime import datetime
 
 from withings_service import fetch_and_store_withings_data
+from db import log_sync_event
+from sync_activity import set_withings_syncing
 
 # Deutlich unter der ~3h-Zugriffstoken-Lebensdauer, damit get_withings_tokens() (siehe
 # withings_auth.py) den Token nie ungenutzt ablaufen lässt.
@@ -45,13 +47,18 @@ async def run_withings_auto_sync_forever(interval_seconds=WITHINGS_SYNC_INTERVAL
     auto_sync.py::run_daily_auto_sync_forever für den äußeren try/except."""
     while True:
         _status["last_run_at"] = datetime.now().isoformat()
+        set_withings_syncing(True)
         try:
             target_date = now_fn().date().isoformat()
             count = await asyncio.to_thread(fetch_and_store_withings_data, target_date)
             _status["last_success_at"] = datetime.now().isoformat()
             _status["last_error"] = None
             _status["last_measurement_count"] = count
+            log_sync_event("withings", "auto", "abgeschlossen", f"{count} Messung(en)")
         except Exception as e:
             _status["last_error"] = str(e)
             print(f"⚠️  withings_auto_sync: Sync fehlgeschlagen: {e}")
+            log_sync_event("withings", "auto", "fehler", str(e))
+        finally:
+            set_withings_syncing(False)
         await asyncio.sleep(interval_seconds)

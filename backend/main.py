@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from routers import daily_summary, sync_status, today, club_slots, weekly_plan, performance, insight_memory, \
-    sleep, habit_tracker, data_sync, body
+    sleep, habit_tracker, data_sync, body, ai_texts
 from auto_sync import run_daily_auto_sync_forever
 from withings_auto_sync import run_withings_auto_sync_forever
 from db import init_db
@@ -57,6 +57,7 @@ app.include_router(sleep.router)
 app.include_router(habit_tracker.router)
 app.include_router(data_sync.router)
 app.include_router(body.router)
+app.include_router(ai_texts.router)
 
 
 @app.get("/api/health")

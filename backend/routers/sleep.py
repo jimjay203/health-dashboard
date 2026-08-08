@@ -362,25 +362,20 @@ def get_sleep_trend(days: int = 28) -> SleepTrendResponse:
 
 class CorrelationsInsightResponse(BaseModel):
     date: str
-    insight_text: str
-    generated_at: str
+    insight_text: str | None = None
+    generated_at: str | None = None
 
 
 @router.get("/correlations-insight", response_model=CorrelationsInsightResponse)
 def get_correlations_insight() -> CorrelationsInsightResponse:
-    """Cache-dann-lazy-generieren wie GET /api/daily-recommendation/{date} (today.py) - Cache-
-    Schlüssel ist "heute", da sich der zugrundeliegende 28-Tage-Trend innerhalb eines Tages nicht
-    ändert und ein Neu-Generieren pro Seitenaufruf unnötiger Gemini-Traffic wäre."""
+    """Reines Cache-Lesen, KEIN automatisches Generieren mehr (Nutzer-Vorgabe vom 2026-08-08 -
+    KI-Texte sollen nur noch explizit per "Neu generieren"-Button entstehen). Leere Response
+    (insight_text=None), falls für heute noch nichts generiert wurde."""
     today = date.today().isoformat()
     cached = get_cached_correlations_insight(today)
     if cached:
         return CorrelationsInsightResponse(**cached)
-    try:
-        points = get_sleep_trend(days=28).points
-        fresh = generate_correlations_insight(today, points)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Einordnung konnte nicht generiert werden: {e}")
-    return CorrelationsInsightResponse(**fresh)
+    return CorrelationsInsightResponse(date=today)
 
 
 @router.post("/correlations-insight/regenerate", response_model=CorrelationsInsightResponse)
@@ -400,23 +395,18 @@ def regenerate_correlations_insight() -> CorrelationsInsightResponse:
 
 class TrendInsightResponse(BaseModel):
     date: str
-    insight_text: str
-    generated_at: str
+    insight_text: str | None = None
+    generated_at: str | None = None
 
 
 @router.get("/trend-insight", response_model=TrendInsightResponse)
 def get_trend_insight() -> TrendInsightResponse:
-    """Cache-dann-lazy-generieren, gleiches Muster wie get_correlations_insight oben."""
+    """Reines Cache-Lesen, kein automatisches Generieren mehr - siehe get_correlations_insight."""
     today = date.today().isoformat()
     cached = get_cached_trend_insight(today)
     if cached:
         return TrendInsightResponse(**cached)
-    try:
-        points = get_sleep_trend(days=28).points
-        fresh = generate_trend_insight(today, points)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Einordnung konnte nicht generiert werden: {e}")
-    return TrendInsightResponse(**fresh)
+    return TrendInsightResponse(date=today)
 
 
 @router.post("/trend-insight/regenerate", response_model=TrendInsightResponse)

@@ -8,6 +8,7 @@ import {
   fetchBodyTrend,
   fetchBodyTrendInsight,
   regenerateBodyTrendInsight,
+  formatGeneratedAt,
   fetchBodyWhatIf,
   fetchBodySettings,
   saveBodySettings,
@@ -904,18 +905,22 @@ function BodyView() {
         <div className="card">
           <h3>
             Trend (90 Tage)
-            {trendInsight && (
-              <InsightRegenerateButton regenerateFn={regenerateBodyTrendInsight} onRegenerated={setTrendInsight} />
-            )}
+            <InsightRegenerateButton regenerateFn={regenerateBodyTrendInsight} onRegenerated={setTrendInsight} />
           </h3>
           <div className="sleep-trend-row">
             <div className="sleep-insight-col">
-              {trendInsightLoading && !trendInsight ? (
-                <p className="week-rationale">Lade Einordnung…</p>
-              ) : trendInsight ? (
-                <p className="sleep-insight-text">{trendInsight.insight_text}</p>
+              {trendInsightLoading ? (
+                <p className="week-rationale">Lade…</p>
+              ) : trendInsight?.insight_text ? (
+                <>
+                  <p className="sleep-insight-text">
+                    <Icon name="auto_awesome" className="ai-text-icon" />
+                    {trendInsight.insight_text}
+                  </p>
+                  <p className="ai-text-timestamp">Erstellt: {formatGeneratedAt(trendInsight.generated_at)}</p>
+                </>
               ) : (
-                <p className="week-rationale">Keine Einordnung verfügbar.</p>
+                <p className="week-rationale">Noch nicht generiert - über den Pfeil oben erzeugen.</p>
               )}
             </div>
             <CompositionTrendCharts trend={trend} />

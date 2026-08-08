@@ -1,6 +1,6 @@
 import sqlite3
 import os
-from datetime import date
+from datetime import date, datetime
 
 DB_PATH = os.getenv("DB_PATH", "data/dashboard.db")
 
@@ -931,6 +931,29 @@ def init_db():
     )
     """)
 
+    # Chronologischer Sync-Verlauf (Einstellungen-Seite), geteilt zwischen Garmin und Withings
+    # (provider-Spalte) - anders als auto_sync_status oben (eine Zeile PRO TAG, aggregiert)
+    # protokolliert diese Tabelle JEDEN einzelnen Lauf einzeln (append-only, AUTOINCREMENT-id),
+    # damit die Historie auch mehrere Läufe desselben Tages einzeln sichtbar macht. sync_type
+    # unterscheidet die Auslöser: "check" (nur Garmin - Schlafdaten-Verfügbarkeits-Check, siehe
+    # auto_sync.py::check_sleep_data_available), "auto" (automatischer Sync, bei Garmin der aus dem
+    # Check ausgelöste volle Tages-Sync, bei Withings der stündliche Token-Keepalive-Sync) und
+    # "manual" (TopBar-Button/Einstellungen-Formular).
+    cursor.execute("DROP TABLE IF EXISTS garmin_sync_log")
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS sync_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp TIMESTAMP NOT NULL,
+        provider TEXT NOT NULL,
+        sync_type TEXT NOT NULL,
+        status TEXT NOT NULL,
+        detail TEXT
+    )
+    """)
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_sync_log_provider_timestamp ON sync_log(provider, timestamp)"
+    )
+
     # Wiederkehrende Vereins-Trainingstermine (siehe training_slots.py) - kein date-PK, mehrere
     # Slots pro Wochentag möglich, daher eigenständige id/AUTOINCREMENT-Tabelle statt Aufnahme in
     # das obige daily_tables-Dict (das ist ausschließlich für date-PK-Tabellen gedacht).
@@ -1182,6 +1205,29 @@ def save_journal_entry(date_str, rpe, soreness, energy, notes):
     """, (date_str, rpe, soreness, energy, notes))
     conn.commit()
     conn.close()
+
+def log_sync_event(provider, sync_type, status, detail=None):
+    """Ein Eintrag im chronologischen Sync-Verlauf (siehe sync_log-Schema in init_db()) -
+    provider: "garmin"/"withings", sync_type: "check"/"auto"/"manual"."""
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO sync_log (timestamp, provider, sync_type, status, detail) VALUES (?, ?, ?, ?, ?)",
+        (datetime.now().isoformat(), provider, sync_type, status, detail)
+    )
+    conn.commit()
+    conn.close()
+
+
+def list_sync_log(provider, limit=50):
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT id, timestamp, provider, sync_type, status, detail FROM sync_log "
+        "WHERE provider = ? ORDER BY timestamp DESC, id DESC LIMIT ?",
+        (provider, limit)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
 
 if __name__ == "__main__":
     init_db()

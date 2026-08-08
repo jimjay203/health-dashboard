@@ -605,22 +605,18 @@ def delete_performance_goal(key: str) -> dict:
 
 class PerformanceGoalsInsightResponse(BaseModel):
     date: str
-    insight_text: str
-    generated_at: str
+    insight_text: str | None = None
+    generated_at: str | None = None
 
 
 @router.get("/goals-insight", response_model=PerformanceGoalsInsightResponse)
 def get_goals_insight() -> PerformanceGoalsInsightResponse:
-    """Cache-dann-lazy-generieren, gleiches Muster wie backend/routers/body.py::get_trend_insight."""
+    """Reines Cache-Lesen, kein automatisches Generieren mehr (Nutzer-Vorgabe vom 2026-08-08)."""
     today = date.today().isoformat()
     cached = get_cached_goals_insight(today)
     if cached:
         return PerformanceGoalsInsightResponse(**cached)
-    try:
-        fresh = generate_goals_insight(today)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Einschätzung konnte nicht generiert werden: {e}")
-    return PerformanceGoalsInsightResponse(**fresh)
+    return PerformanceGoalsInsightResponse(date=today)
 
 
 @router.post("/goals-insight/regenerate", response_model=PerformanceGoalsInsightResponse)

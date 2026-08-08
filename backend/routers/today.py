@@ -33,17 +33,29 @@ def _validate_date(date_str):
 
 class RecommendationResponse(BaseModel):
     date: str
-    recommendation_text: str
-    reasoning_bullets: list[str]
-    generated_at: str
+    recommendation_text: str | None = None
+    reasoning_bullets: list[str] | None = None
+    generated_at: str | None = None
 
 
 @router.get("/daily-recommendation/{date_str}", response_model=RecommendationResponse)
 def get_daily_recommendation(date_str: str) -> RecommendationResponse:
+    """Reines Cache-Lesen, kein automatisches Generieren mehr (Nutzer-Vorgabe vom 2026-08-08 -
+    KI-Texte sollen nur noch explizit per "Neu generieren"-Button entstehen)."""
     _validate_date(date_str)
     cached = get_cached_recommendation(date_str)
     if cached:
         return RecommendationResponse(**cached)
+    return RecommendationResponse(date=date_str)
+
+
+@router.post("/daily-recommendation/{date_str}/regenerate", response_model=RecommendationResponse)
+def regenerate_daily_recommendation(date_str: str) -> RecommendationResponse:
+    """Erzwingt eine Neu-Generierung unabhängig vom Tages-Cache, gleiches Muster wie
+    backend/routers/weekly_plan.py::regenerate_weekly_plan. Bewusst OHNE override_value (die
+    Override-Buttons unten bleiben der einzige Weg, eine Nutzer-Rückmeldung einfließen zu lassen -
+    ein reiner Refresh-Klick hier setzt keine bestehende Überschreibung fort)."""
+    _validate_date(date_str)
     try:
         fresh = generate_daily_recommendation(date_str)
     except Exception as e:

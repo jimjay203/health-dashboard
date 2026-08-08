@@ -2,11 +2,21 @@
 // des FastAPI+React-Rebuilds). Im Docker-Build liefert FastAPI selbst /api/* aus derselben
 // Origin aus, lokal übernimmt vite.config.ts den Dev-Proxy.
 
+// Felder nullable, seit KI-Texte nicht mehr automatisch beim Seitenaufruf generiert werden
+// (Nutzer-Vorgabe vom 2026-08-08) - GET liefert ab dann {recommendation_text: null, ...}, bis
+// explizit über den Regenerate-Button oder die TopBar-Sammel-Pille generiert wurde.
 export interface Recommendation {
   date: string;
-  recommendation_text: string;
-  reasoning_bullets: string[];
-  generated_at: string;
+  recommendation_text: string | null;
+  reasoning_bullets: string[] | null;
+  generated_at: string | null;
+}
+
+// Gemeinsamer Zeitstempel-Formatierer für alle KI-Text-Karten (Sleep/Body/Performance-Insights,
+// Heute-Empfehlung) - "Erstellt: TT.MM., HH:MM".
+export function formatGeneratedAt(iso: string | null): string {
+  if (!iso) return "";
+  return new Date(iso).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
 export type OverrideValue = "worse" | "better" | "neutral";
@@ -380,8 +390,8 @@ export function deletePerformanceGoal(key: string): Promise<{ success: boolean }
 // gleiches Muster wie fetchBodyTrendInsight/fetchSleepTrendInsight.
 export interface PerformanceGoalsInsight {
   date: string;
-  insight_text: string;
-  generated_at: string;
+  insight_text: string | null;
+  generated_at: string | null;
 }
 
 export function fetchPerformanceGoalsInsight(): Promise<PerformanceGoalsInsight> {
@@ -502,6 +512,14 @@ export function postOverride(date: string, overrideValue: OverrideValue): Promis
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ override_value: overrideValue }),
   }).then((res) => handle<Recommendation>(res));
+}
+
+// Reiner Refresh-Klick, unabhängig von den Override-Buttons oben (siehe backend/routers/today.py::
+// regenerate_daily_recommendation - setzt keine bestehende Überschreibung fort).
+export function regenerateRecommendation(date: string): Promise<Recommendation> {
+  return fetch(`/api/daily-recommendation/${date}/regenerate`, { method: "POST" }).then((res) =>
+    handle<Recommendation>(res)
+  );
 }
 
 // --- Tagesjournal (RPE/Muskelkater/Energie + Freitext, siehe backend/routers/today.py) ---
@@ -634,8 +652,8 @@ export function fetchSleepTrend(days = 28): Promise<SleepTrend> {
 // generieren pro Tag, gleiches Muster wie fetchRecommendation.
 export interface SleepCorrelationsInsight {
   date: string;
-  insight_text: string;
-  generated_at: string;
+  insight_text: string | null;
+  generated_at: string | null;
 }
 
 export function fetchSleepCorrelationsInsight(): Promise<SleepCorrelationsInsight> {
@@ -652,8 +670,8 @@ export function regenerateSleepCorrelationsInsight(): Promise<SleepCorrelationsI
 // fetchSleepCorrelationsInsight.
 export interface SleepTrendInsight {
   date: string;
-  insight_text: string;
-  generated_at: string;
+  insight_text: string | null;
+  generated_at: string | null;
 }
 
 export function fetchSleepTrendInsight(): Promise<SleepTrendInsight> {
@@ -774,6 +792,28 @@ export function fetchBackfillStatus(): Promise<BackfillStatus> {
   return fetch(`/api/data-sync/backfill-status`).then((res) => handle<BackfillStatus>(res));
 }
 
+// Chronologischer Sync-Verlauf (siehe db.py::sync_log) - eine Zeile pro Lauf, nicht aggregiert pro
+// Tag. sync_type bei Garmin: "check" (Schlafdaten-Verfügbarkeits-Check), "auto" (daraus
+// ausgelöster voller Tages-Sync), "manual" (TopBar-Button/Einstellungen-Formular/Backfill). Bei
+// Withings nur "auto" (stündlicher Token-Keepalive-Sync) und "manual" (Formular/Voll-Historie) -
+// kein eigener Verfügbarkeits-Check-Schritt wie bei Garmin.
+export interface SyncLogEntry {
+  id: number;
+  timestamp: string;
+  provider: "garmin" | "withings";
+  sync_type: "check" | "auto" | "manual";
+  status: string;
+  detail: string | null;
+}
+
+export function fetchGarminSyncLog(limit = 50): Promise<SyncLogEntry[]> {
+  return fetch(`/api/data-sync/garmin-sync-log?limit=${limit}`).then((res) => handle<SyncLogEntry[]>(res));
+}
+
+export function fetchWithingsSyncLog(limit = 50): Promise<SyncLogEntry[]> {
+  return fetch(`/api/data-sync/withings-sync-log?limit=${limit}`).then((res) => handle<SyncLogEntry[]>(res));
+}
+
 // CTL/ATL/TSB (daily_summary/weekly_summary) für einen Zeitraum neu berechnen - rein lokal, kein
 // Garmin-API-Call (siehe daily_summary.py::recompute_summary_range), deshalb blockierend statt
 // Hintergrund-Task mit Polling wie beim Backfill oben.
@@ -870,6 +910,37 @@ export function fetchSyncStatus(): Promise<SyncStatus> {
 export function triggerSync(): Promise<{ success: boolean; error: string | null }> {
   return fetch(`/api/sync-trigger`, { method: "POST" }).then((res) =>
     handle<{ success: boolean; error: string | null }>(res)
+  );
+}
+
+// Live-Zustand "läuft gerade ein Sync" für die TopBar-Pille (siehe sync_activity.py) - gepollt,
+// unabhängig vom persistenten Verlauf (fetchGarminSyncLog/fetchWithingsSyncLog).
+export interface SyncActivity {
+  garmin_syncing: boolean;
+  withings_syncing: boolean;
+}
+
+export function fetchSyncActivity(): Promise<SyncActivity> {
+  return fetch(`/api/sync-activity`).then((res) => handle<SyncActivity>(res));
+}
+
+// Sammel-Regenerierung aller KI-Texte für die zweite TopBar-Pille (siehe backend/routers/
+// ai_texts.py) - bewusst blockierend (läuft mehrere Gemini-Aufrufe sequentiell durch), das
+// fetch-Promise löst sich entsprechend erst nach Abschluss aller Einzel-Aufrufe auf.
+export interface RegenerateAllResult {
+  key: string;
+  label: string;
+  success: boolean;
+  error: string | null;
+}
+
+export interface RegenerateAllResponse {
+  results: RegenerateAllResult[];
+}
+
+export function regenerateAllAiTexts(): Promise<RegenerateAllResponse> {
+  return fetch(`/api/ai-texts/regenerate-all`, { method: "POST" }).then((res) =>
+    handle<RegenerateAllResponse>(res)
   );
 }
 
@@ -1039,8 +1110,8 @@ export function fetchBodyTrend(days = 90): Promise<BodyTrend> {
 // fetchSleepTrendInsight.
 export interface BodyTrendInsight {
   date: string;
-  insight_text: string;
-  generated_at: string;
+  insight_text: string | null;
+  generated_at: string | null;
 }
 
 export function fetchBodyTrendInsight(): Promise<BodyTrendInsight> {

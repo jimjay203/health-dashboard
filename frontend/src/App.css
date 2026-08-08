@@ -1942,6 +1942,24 @@ button.journal-status-pill {
   white-space: pre-wrap;
 }
 
+/* Erstellt-Zeitstempel unter jedem KI-generierten Text (Sleep-/Körper-/Leistung-Insights,
+   Heute-Empfehlung) - seit KI-Texte nicht mehr automatisch generiert werden, macht dieser
+   Hinweis sichtbar, wie aktuell ein gezeigter Text ist. */
+.ai-text-timestamp {
+  font-size: var(--text-xs);
+  color: var(--text);
+  opacity: 0.6;
+  margin-top: 4px;
+}
+
+/* Dasselbe Icon wie die "KI-Texte"-Pille in der TopBar (auto_awesome) - direkt vor jedem
+   KI-generierten Text, markiert ihn auf einen Blick als KI-generiert statt reine Anzeige. */
+.ai-text-icon {
+  color: var(--accent);
+  margin-right: 5px;
+  vertical-align: -3px;
+}
+
 /* .hrv-trend-panel bleibt sonst unverändert (siehe HrvTrendPanel.tsx/Leistung-Seite) - hier nur
    innerhalb von .sleep-trend-row als Flex-Item mit mehr Breite als die Insight-Spalte. Gleiche
    Regel für .body-trend-grid (Körper-Seite, BodyView.tsx), das dieselbe .sleep-trend-row-Zeile
